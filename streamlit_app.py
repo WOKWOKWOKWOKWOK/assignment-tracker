@@ -4,7 +4,7 @@ Assignment Tracker — Streamlit app with Supabase auth + Postgres persistence
 Requirements:
 - Create a Supabase project and run the SQL in init_db.sql (not included here).
 - Add the Supabase URL & ANON KEY to Streamlit secrets.
-- Install requirements in requirements.txt (streamlit, pandas, supabase).
+- Install requirements in requirements.txt.
 
 Example Streamlit secrets:
 [supabase]
@@ -46,22 +46,81 @@ def _wrap_result(res):
         return {"error": None, "data": None}
 
 
-def current_user():
-    """Return current user dict from Supabase client (or None)."""
-    try:
-        session = sb.auth.get_session()
-    except Exception:
+def extract_user_from_auth_response(response):
+    """
+    Try many shapes of Supabase auth responses and return a user dict or None.
+    Works for dict responses and object responses.
+    """
+    if response is None:
         return None
 
-    try:
-        if isinstance(session, dict):
-            data = session.get("data", session)
-            if isinstance(data, dict):
-                user = data.get("session", {}).get("user") or data.get("user")
+    # dict responses
+    if isinstance(response, dict):
+        # common pattern: {"data": {"user": {...}}}
+        data = response.get("data")
+        if isinstance(data, dict):
+            # session.user
+            user = data.get("user")
+            if isinstance(user, dict):
                 return user
-        return getattr(session, "user", None)
+            session = data.get("session")
+            if isinstance(session, dict):
+                user = session.get("user")
+                if isinstance(user, dict):
+                    return user
+
+        # top-level user
+        user = response.get("user")
+        if isinstance(user, dict):
+            return user
+
+        # nested under data.session.user
+        session = response.get("session")
+        if isinstance(session, dict):
+            user = session.get("user")
+            if isinstance(user, dict):
+                return user
+
+        # some versions return {'data': {'session': {'user': {...}}}}
+        if isinstance(data, dict):
+            session = data.get("session")
+            if isinstance(session, dict):
+                user = session.get("user")
+                if isinstance(user, dict):
+                    return user
+
+    # object-style responses
+    for attr in ["user", "session"]:
+        try:
+            obj = getattr(response, attr, None)
+        except Exception:
+            obj = None
+        if isinstance(obj, dict):
+            return obj
+        if obj is not None and hasattr(obj, "user"):
+            nested = getattr(obj, "user", None)
+            if isinstance(nested, dict):
+                return nested
+
+    # some objects store it under .data.user or .data.session.user
+    try:
+        data_obj = getattr(response, "data", None)
+        if isinstance(data_obj, dict):
+            user = data_obj.get("user") or data_obj.get("session", {}).get("user")
+            if isinstance(user, dict):
+                return user
     except Exception:
-        return None
+        pass
+
+    # fallback: response itself may be a plain dict-like object
+    try:
+        user = response["user"]
+        if isinstance(user, dict):
+            return user
+    except Exception:
+        pass
+
+    return None
 
 
 def sign_up(email: str, password: str):
@@ -85,9 +144,11 @@ def sign_out():
         sb.auth.sign_out()
     except Exception:
         pass
+
     for k in ["user", "df_cached"]:
         if k in st.session_state:
             del st.session_state[k]
+
     try:
         st.rerun()
     except Exception:
@@ -125,7 +186,6 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
             df[col] = ""
     if "user_id" not in df.columns:
         df["user_id"] = user_id
-
     return df[["id", "title", "course", "due_date", "status", "notes", "created_at", "user_id"]]
 
 
@@ -176,18 +236,7 @@ else:
                 err = r.get("error") if isinstance(r, dict) else getattr(r, "error", None)
                 data = r.get("data") if isinstance(r, dict) else getattr(r, "data", None)
 
-                user_obj = None
-                try:
-                    if isinstance(data, dict):
-                        user_obj = data.get("user") or data.get("session", {}).get("user")
-                except Exception:
-                    pass
-
-                if not user_obj:
-                    try:
-                        user_obj = r.get("user") if isinstance(r, dict) else getattr(r, "user", None)
-                    except Exception:
-                        user_obj = None
+                user_obj = extract_user_from_auth_response(r)
 
                 if err:
                     st.sidebar.error(f"Sign in failed: {err}")
@@ -203,6 +252,7 @@ else:
                         except Exception:
                             pass
 
+# refresh user info from session_state (if sign in stored it)
 if "user" in st.session_state:
     user = st.session_state.user
 
@@ -246,9 +296,9 @@ with st.sidebar.form("add_form", clear_on_submit=True):
 
 st.markdown("---")
 
+# Load assignments
 if "df_cached" not in st.session_state:
     st.session_state.df_cached = fetch_assignments(user_id)
-
 df = st.session_state.df_cached.copy()
 
 # Summary stats
