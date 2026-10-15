@@ -8,7 +8,21 @@ def _wrap_result(res):
         return {"error": err, "data": data}
     except Exception:
         return {"error": None, "data": None}
+# TEMP DEBUG - remove after testing
+try:
+    st.sidebar.write("Streamlit started OK")
+    # show only the secret keys names, not values
+    st.sidebar.write("supabase secret keys present:", list(st.secrets.get("supabase", {}).keys()))
+except Exception as e:
+    st.sidebar.error("Secrets check error: " + str(e))
 
+try:
+    auth_obj = getattr(sb, "auth", None)
+    auth_methods = [n for n in dir(auth_obj) if not n.startswith("_")] if auth_obj else []
+    st.sidebar.write("sb.auth methods:", auth_methods)
+except Exception as e:
+    st.sidebar.write("Auth client inspection error: " + str(e))
+# END TEMP DEBUG
 
 def sign_in(email: str, password: str):
     """
