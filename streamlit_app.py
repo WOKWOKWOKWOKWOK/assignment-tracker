@@ -3,17 +3,13 @@ Assignment Tracker — Streamlit app with Supabase auth + Postgres persistence
 
 Requirements:
 - Create a Supabase project and run the SQL in init_db.sql (not added here).
-- Add the SupABASE URL & ANON KEY to Streamlit secrets.
+- Add the Supabase URL & ANON KEY to Streamlit secrets.
 - Install requirements in requirements.txt (e.g. streamlit, pandas, supabase).
 
-Notes:
-- DO NOT hardcode keys into this file. Put them into Streamlit secrets as shown below.
-
-Streamlit secrets example (.streamlit/secrets.toml or Streamlit Cloud Secrets):
-
+Streamlit secrets example:
 [supabase]
-url = "https://YOURPROJECT.supabase.co"
-key = "YOUR_ANON_KEY"
+url = "https://fvyluockpbswsocxgoen.supabase.co"
+key = "sb_publishable_qBZ-Twb9O_hi8sZesyCTQA__XJTqsmS"
 """
 
 from datetime import datetime, date
@@ -25,7 +21,6 @@ from supabase import create_client, Client
 # -----------------------
 # Configuration / secrets
 # -----------------------
-# Expecting secrets under st.secrets["supabase"]["url"] and ["key"]
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"]
     SUPABASE_KEY = st.secrets["supabase"]["key"]
@@ -47,14 +42,11 @@ def current_user():
     """Return current user dict from Supabase client (or None)."""
     try:
         session = sb.auth.get_session()
-        # supabase-py may return a dict or an object depending on version
         if isinstance(session, dict):
             data = session.get("data", session)
             if isinstance(data, dict):
-                # try common locations
                 user = data.get("user") or data.get("session", {}).get("user")
                 return user
-        # object-style
         return getattr(session, "user", None)
     except Exception:
         return None
@@ -65,26 +57,19 @@ def _wrap_result(res):
     if isinstance(res, dict):
         return res
     try:
-        # many client results expose .error and .data
         err = getattr(res, "error", None)
         data = getattr(res, "data", None)
-        out = {"error": err, "data": data}
-        return out
+        return {"error": err, "data": data}
     except Exception:
         return {"error": None, "data": None}
 
 
 def sign_in(email: str, password: str):
-    """
-    Try common supabase client sign-in call signatures and return a normalized result.
-    Returns a dict-like object: either the raw response (if dict) or {"error": ..., "data": ...}
-    """
-    # Try keyword-arg style first
+    """Try common supabase client sign-in signatures."""
     try:
         res = sb.auth.sign_in(email=email, password=password)
         return _wrap_result(res)
     except TypeError:
-        # client didn't accept kwargs, try dict payload style
         try:
             res = sb.auth.sign_in_with_password({"email": email, "password": password})
             return _wrap_result(res)
@@ -95,9 +80,7 @@ def sign_in(email: str, password: str):
 
 
 def sign_up(email: str, password: str):
-    """
-    Try common supabase client sign-up call signatures and return a normalized result.
-    """
+    """Try common supabase client sign-up signatures."""
     try:
         res = sb.auth.sign_up(email=email, password=password)
         return _wrap_result(res)
@@ -115,13 +98,12 @@ def sign_out():
     try:
         sb.auth.sign_out()
     except Exception:
-        # some client versions return None or raise; ignore
         pass
-    # clear front-end session state
+
     for k in ["user", "df_cached"]:
         if k in st.session_state:
             del st.session_state[k]
-    # rerun to update UI
+
     try:
         st.experimental_rerun()
     except Exception:
@@ -139,12 +121,12 @@ def sign_out():
 def fetch_assignments(user_id: str) -> pd.DataFrame:
     if not user_id:
         return pd.DataFrame(columns=["id", "title", "course", "due_date", "status", "notes", "created_at", "user_id"])
+
     try:
         res = sb.table("assignments").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
     except Exception:
         return pd.DataFrame(columns=["id", "title", "course", "due_date", "status", "notes", "created_at", "user_id"])
 
-    data = None
     if isinstance(res, dict):
         data = res.get("data")
     else:
@@ -154,12 +136,14 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["id", "title", "course", "due_date", "status", "notes", "created_at", "user_id"])
 
     df = pd.DataFrame(data)
+
     if "due_date" in df.columns:
         df["due_date"] = df["due_date"].fillna("").astype(str)
+
     for col in ["notes", "title", "course", "status", "created_at", "id"]:
         if col not in df.columns:
             df[col] = ""
-    # ensure user_id column exists
+
     if "user_id" not in df.columns:
         df["user_id"] = user_id
 
@@ -170,8 +154,7 @@ def upsert_assignments(records: list):
     if not records:
         return
     try:
-        res = sb.table("assignments").upsert(records).execute()
-        return res
+        return sb.table("assignments").upsert(records).execute()
     except Exception as e:
         st.error(f"Failed to write to database: {e}")
         return None
@@ -179,8 +162,7 @@ def upsert_assignments(records: list):
 
 def delete_assignment_by_id(assign_id: str, user_id: str):
     try:
-        res = sb.table("assignments").delete().eq("id", assign_id).eq("user_id", user_id).execute()
-        return res
+        return sb.table("assignments").delete().eq("id", assign_id).eq("user_id", user_id).execute()
     except Exception as e:
         st.error(f"Delete failed: {e}")
         return None
@@ -190,6 +172,7 @@ def delete_assignment_by_id(assign_id: str, user_id: str):
 # UI: Authentication
 # -----------------------
 user = current_user()
+
 if user:
     st.sidebar.write(f"Signed in as: {user.get('email') or user.get('user_metadata', {}).get('email')}")
     if st.sidebar.button("Sign out"):
@@ -197,10 +180,12 @@ if user:
 else:
     st.sidebar.header("Sign in / Sign up")
     auth_mode = st.sidebar.radio("Mode", ["Sign in", "Sign up"])
+
     with st.sidebar.form("auth_form"):
         email = st.text_input("Email", key="auth_email")
         password = st.text_input("Password", type="password", key="auth_pw")
         submitted = st.form_submit_button(auth_mode)
+
         if submitted:
             if auth_mode == "Sign up":
                 r = sign_up(email.strip(), password)
@@ -213,17 +198,20 @@ else:
                 r = sign_in(email.strip(), password)
                 err = r.get("error") if isinstance(r, dict) else getattr(r, "error", None)
                 data = r.get("data") if isinstance(r, dict) else getattr(r, "data", None)
+
                 user_obj = None
                 try:
                     if isinstance(data, dict):
                         user_obj = data.get("user") or data.get("session", {}).get("user")
                 except Exception:
                     pass
+
                 if not user_obj:
                     try:
                         user_obj = r.get("user") if isinstance(r, dict) else getattr(r, "user", None)
                     except Exception:
                         user_obj = None
+
                 if err:
                     st.sidebar.error(f"Sign in failed: {err}")
                 elif not user_obj:
@@ -257,6 +245,7 @@ if not user_id:
 # -----------------------
 st.sidebar.markdown("---")
 st.sidebar.header("Add assignment")
+
 with st.sidebar.form("add_form", clear_on_submit=True):
     t = st.text_input("Title", "")
     c = st.text_input("Course", "")
@@ -281,32 +270,32 @@ with st.sidebar.form("add_form", clear_on_submit=True):
 
 st.markdown("---")
 
-# Load assignments for the current user (cached in session_state to reduce calls)
 if "df_cached" not in st.session_state:
     st.session_state.df_cached = fetch_assignments(user_id)
 
 df = st.session_state.df_cached.copy()
 
-# Summary stats
 total = len(df)
 in_progress = df["status"].eq("In Progress").sum() if "status" in df else 0
 completed = df["status"].eq("Completed").sum() if "status" in df else 0
+
 st.metric("Total", total)
 col1, col2 = st.columns(2)
 col1.metric("In Progress", in_progress)
 col2.metric("Completed", completed)
 
 st.markdown("---")
-# Filters
+
 filter_status = st.multiselect("Status", options=STATUS_OPTIONS, default=STATUS_OPTIONS)
 filter_course = st.text_input("Course contains", value="")
 filtered = df
+
 if filter_course:
     filtered = filtered[filtered["course"].str.contains(filter_course, case=False, na=False)]
+
 if filter_status:
     filtered = filtered[filtered["status"].isin(filter_status)]
 
-# Display / edit
 st.subheader("Assignments (your data)")
 if filtered.empty:
     st.info("No assignments yet. Add one from the sidebar.")
@@ -332,15 +321,17 @@ else:
                     "created_at": row.get("created_at") or datetime.utcnow().isoformat(),
                 }
                 records.append(rec)
-
             upsert_assignments(records)
             st.success("Saved changes")
             st.session_state.df_cached = fetch_assignments(user_id)
-            if hasattr(st, "rerun"):
-                st.rerun()
-            else:
+            try:
                 st.experimental_rerun()
-
+            except Exception:
+                try:
+                    if hasattr(st, "rerun"):
+                        st.rerun()
+                except Exception:
+                    pass
     except Exception:
         st.dataframe(display_df.drop(columns=["user_id"]))
         st.info("Inline editor not available in this Streamlit version; use actions below to modify data.")
@@ -348,6 +339,7 @@ else:
 st.markdown("---")
 st.subheader("Actions")
 cols = st.columns([1, 1, 1, 2])
+
 with cols[0]:
     delete_id = st.text_input("Delete by id", "")
     if st.button("Delete assignment"):
@@ -357,6 +349,7 @@ with cols[0]:
             delete_assignment_by_id(delete_id, user_id)
             st.session_state.df_cached = fetch_assignments(user_id)
             st.success("Deleted (if it existed)")
+
 with cols[1]:
     if st.button("Clear completed"):
         to_delete = st.session_state.df_cached[st.session_state.df_cached["status"] == "Completed"]["id"].tolist()
@@ -364,10 +357,12 @@ with cols[1]:
             delete_assignment_by_id(aid, user_id)
         st.session_state.df_cached = fetch_assignments(user_id)
         st.success("Cleared completed assignments")
+
 with cols[2]:
     if st.button("Export CSV"):
         csv = st.session_state.df_cached.to_csv(index=False)
         st.download_button("Download CSV", data=csv, file_name="assignments.csv", mime="text/csv")
+
 with cols[3]:
     if st.button("Reset demo data"):
         demo = [
