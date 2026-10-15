@@ -8,8 +8,8 @@ Requirements:
 
 Streamlit secrets example:
 [supabase]
-url = "https://fvyluockpbswsocxgoen.supabase.co"
-key = "sb_publishable_qBZ-Twb9O_hi8sZesyCTQA__XJTqsmS"
+url = "https://YOURPROJECT.supabase.co"
+key = "YOU_ANON_KEY"
 """
 
 from datetime import datetime, date
