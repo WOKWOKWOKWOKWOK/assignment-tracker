@@ -109,6 +109,40 @@ def sign_in(email: str, password: str):
     except Exception as e:
         return {"error": str(e), "data": None}
 
+def _debug_signin_result(r):
+    """Safe debug: print types and keys/attrs without printing token values."""
+    try:
+        st.sidebar.write("SIGN-IN DEBUG")
+        st.sidebar.write("result type:", type(r))
+        if isinstance(r, dict):
+            st.sidebar.write("result keys:", list(r.keys()))
+            st.sidebar.write("error:", bool(r.get("error")))
+            data = r.get("data")
+            st.sidebar.write("data type:", type(data))
+            if isinstance(data, dict):
+                st.sidebar.write("data keys:", list(data.keys()))
+                if "session" in data and isinstance(data["session"], dict):
+                    st.sidebar.write("'session' keys:", list(data["session"].keys()))
+                    st.sidebar.write("'session' contains user?:", "user" in data["session"])
+                if "user" in data and isinstance(data["user"], dict):
+                    st.sidebar.write("'user' keys:", list(data["user"].keys()))
+        else:
+            # object-style responses
+            attrs = [a for a in dir(r) if not a.startswith("_")]
+            st.sidebar.write("result attrs (sample):", attrs[:40])
+            try:
+                has_user = hasattr(r, "user")
+                st.sidebar.write("has .user attribute?:", has_user)
+                if has_user:
+                    u = getattr(r, "user")
+                    st.sidebar.write("user type:", type(u))
+                    if isinstance(u, dict):
+                        st.sidebar.write("user keys:", list(u.keys()))
+            except Exception as e:
+                st.sidebar.write("error inspecting .user:", str(e))
+    except Exception as _e:
+        # avoid crashing the app if debug itself fails
+        pass
 
 def sign_out():
     try:
