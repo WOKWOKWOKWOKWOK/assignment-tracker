@@ -1,8 +1,10 @@
 """
 Assignment Tracker — Dark Matrix Overlay UI
 
-This version keeps 100% of the Supabase auth and local JSON fallback persistence
-logic intact while updating the UI to match the compact dark matrix theme.
+Fixes:
+- Resolved StreamlitInvalidLayoutContextError by resetting modal state flags upon opening
+- Made card indicator circle a functional, clickable checkbox that toggles 'Done' / 'Not Started'
+- Preserved 100% of Supabase Auth & JSON persistence backend logic
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ def safe_rerun() -> None:
     elif hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
-# Modal decorator setup replacing invalid st.modal
+# Safe Modal Decorator Setup
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
 elif hasattr(st, "experimental_dialog"):
@@ -127,7 +129,7 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
 
 
 # -----------------------
-# Auth helpers
+# Auth helpers (Supabase)
 # -----------------------
 def sign_up(email: str, password: str) -> Dict[str, Any]:
     auth = getattr(sb, "auth", None) if sb else None
@@ -279,7 +281,7 @@ def current_user() -> Optional[Dict[str, Any]]:
 
 
 # -----------------------
-# Persistence
+# Persistence Helpers
 # -----------------------
 def invalidate_cache():
     if "df_cached" in st.session_state:
@@ -357,7 +359,7 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Date / sort helpers
+# Date / Sort Helpers
 # -----------------------
 def parse_date_iso_or_empty(s: Any) -> Optional[date]:
     if s is None:
@@ -437,7 +439,7 @@ st.markdown(
         border-right: 1px solid #1e293b;
     }
 
-    /* Title Styling */
+    /* App Header Title */
     .app-title {
         font-size: 2.1rem;
         font-weight: 900;
@@ -455,7 +457,7 @@ st.markdown(
         margin-top: 4px;
     }
 
-    /* Toolbar Badges & Actions */
+    /* Engine Status Pill */
     .status-engine-pill {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -477,7 +479,7 @@ st.markdown(
         display: inline-block;
     }
 
-    /* Top Action Buttons Custom Look */
+    /* Top Buttons Styling */
     button[key="toolbar_clear"] {
         background-color: #064e3b !important;
         color: #34d399 !important;
@@ -494,7 +496,7 @@ st.markdown(
         font-weight: 600 !important;
     }
 
-    /* Calendar Banner Box */
+    /* Calendar Banner */
     .calendar-banner-box {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -507,7 +509,7 @@ st.markdown(
         margin: 16px 0 20px 0;
     }
 
-    /* Card Box Styling */
+    /* Card Containers */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
@@ -517,7 +519,19 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
-    /* Inside Card Elements */
+    /* Circular Checkbox Styling */
+    div[data-testid="stCheckbox"] {
+        margin-top: 2px;
+    }
+
+    div[data-testid="stCheckbox"] input[type="checkbox"] {
+        border-radius: 50% !important;
+        width: 18px;
+        height: 18px;
+        accent-color: #10b981;
+        cursor: pointer;
+    }
+
     .course-badge {
         background-color: #1e1b4b;
         color: #818cf8;
@@ -582,7 +596,6 @@ st.markdown(
         margin-top: 6px;
     }
 
-    /* Selectbox inside card tweaks */
     div[data-baseweb="select"] {
         background-color: #0b0f19 !important;
         border-radius: 8px !important;
@@ -593,10 +606,13 @@ st.markdown(
 )
 
 # -----------------------
-# Modal Dialogs
+# Dialog Modals (State-safe)
 # -----------------------
 @dialog_decorator("Create New Assignment")
 def show_add_assignment_dialog(user_id: str):
+    # Reset flag immediately so closing dialog does not re-trigger it
+    st.session_state["_open_add_modal"] = False
+
     courses = _read_courses_file()
     with st.form("add_assignment_form"):
         title = st.text_input("Assignment Name", key="add_title")
@@ -608,7 +624,7 @@ def show_add_assignment_dialog(user_id: str):
         atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
         eta = st.text_input("Estimated Duration (e.g., 30 mins)", key="add_eta")
         notes = st.text_area("Notes", value="", key="add_notes")
-        submitted_add = st.form_submit_button("Add to Layout")
+        submitted_add = st.form_submit_button("Add Assignment")
 
         if submitted_add:
             course_val = (course_free.strip() or course_choice or "MATH").upper()
@@ -631,7 +647,6 @@ def show_add_assignment_dialog(user_id: str):
                 if course_free.strip().upper() not in c_list:
                     c_list.append(course_free.strip().upper())
                     _write_courses_file(c_list)
-            st.session_state["_open_add_modal"] = False
             safe_rerun()
 
 
@@ -639,9 +654,16 @@ def show_add_assignment_dialog(user_id: str):
 def show_edit_assignment_dialog(user_id: str, aid: str):
     rows = _read_data_file()
     assignment = next((r for r in rows if r.get("id") == aid), None)
+
+    # Safely clear assignment ID if item was deleted or invalid
     if not assignment:
-        st.error("Assignment not found.")
+        st.session_state["_edit_assignment_id"] = ""
+        st.warning("Assignment no longer exists.")
         return
+
+    # Clear trigger flag so closing dialog doesn't linger
+    current_aid = st.session_state["_edit_assignment_id"]
+    st.session_state["_edit_assignment_id"] = ""
 
     courses = _read_courses_file()
     with st.form("edit_assignment_form"):
@@ -678,17 +700,17 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
                 "notes": notes.strip(),
             }
             upsert_assignments([updated])
-            st.session_state["_edit_assignment_id"] = ""
             safe_rerun()
 
         if delete_click:
             delete_assignment(aid)
-            st.session_state["_edit_assignment_id"] = ""
             safe_rerun()
 
 
 @dialog_decorator("Manage Classes")
 def show_manage_courses_dialog():
+    st.session_state["_open_manage_courses"] = False
+
     st.subheader("Your Classes")
     courses = _read_courses_file()
     to_remove = []
@@ -703,7 +725,6 @@ def show_manage_courses_dialog():
     if to_remove:
         courses = [c for c in courses if c not in to_remove]
         _write_courses_file(courses)
-        st.session_state["_open_manage_courses"] = False
         safe_rerun()
 
     st.markdown("---")
@@ -714,14 +735,13 @@ def show_manage_courses_dialog():
             if v not in courses:
                 courses.append(v)
                 _write_courses_file(courses)
-                st.session_state["_open_manage_courses"] = False
                 safe_rerun()
             else:
                 st.warning("That class already exists.")
 
 
 # -----------------------
-# Sidebar Sign In / Sign Up (Supabase Auth)
+# Sidebar Auth Flow (Supabase)
 # -----------------------
 user = current_user()
 
@@ -773,7 +793,7 @@ if not user_id:
     st.stop()
 
 # -----------------------
-# State Flags & Dialog Triggers
+# State Flags & Safe Dialog Launchers
 # -----------------------
 if "_open_add_modal" not in st.session_state:
     st.session_state["_open_add_modal"] = False
@@ -792,7 +812,7 @@ if st.session_state.get("_open_manage_courses", False):
     show_manage_courses_dialog()
 
 # -----------------------
-# Top Header & Actions
+# Top Header Bar
 # -----------------------
 col_header_left, col_header_right = st.columns([2.5, 2])
 
@@ -826,7 +846,7 @@ with col_header_right:
         )
 
 # -----------------------
-# Calendar Banner
+# Calendar Banner Box
 # -----------------------
 today_str = datetime.today().strftime("%A, %B %d, %Y")
 st.markdown(
@@ -862,7 +882,7 @@ df = sort_df(df, sort_by)
 if df.empty:
     st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found — your matrix is clear.</div>", unsafe_allow_html=True)
 else:
-    # Render 3 cards per row
+    # 3 Cards per row grid layout
     cards_per_row = 3
     chunked_rows = [df.iloc[i:i + cards_per_row] for i in range(0, len(df), cards_per_row)]
 
@@ -882,16 +902,31 @@ else:
                     priority = row.get("priority") or "Low"
                     row_dict = row.to_dict()
 
-                    # Top Card Row: Radio circle, Subject Badge, Edit button, Status selector
-                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.8, 0.9, 1.8])
+                    # Top Card Row: Interactive Checkbox, Course Badge, Edit Button, Status Selector
+                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.5, 1.7, 0.9, 1.8])
+                    
                     with c_top1:
-                        st.markdown("<span style='font-size:16px; color:#475569;'>◯</span>", unsafe_allow_html=True)
+                        # Interactive circular completion checkbox
+                        is_done = (status == "Done")
+                        chk_done = st.checkbox(
+                            "Done",
+                            value=is_done,
+                            key=f"chk_done_{aid}",
+                            label_visibility="collapsed"
+                        )
+                        if chk_done != is_done:
+                            row_dict["status"] = "Done" if chk_done else "Not Started"
+                            upsert_assignments([row_dict])
+                            safe_rerun()
+
                     with c_top2:
                         st.markdown(f"<span class='course-badge'>{course}</span>", unsafe_allow_html=True)
+                    
                     with c_top3:
                         if st.button("✏️ Edit", key=f"edit_btn_{aid}"):
                             st.session_state["_edit_assignment_id"] = aid
                             safe_rerun()
+                    
                     with c_top4:
                         new_status = st.selectbox(
                             "Status",
@@ -908,13 +943,13 @@ else:
                     # Card Title
                     st.markdown(f"<div class='card-title'>{title}</div>", unsafe_allow_html=True)
 
-                    # Assignment Type with Pin
+                    # Assignment Type Tag
                     st.markdown(f"<div class='card-type'><span>📌</span> {atype}</div>", unsafe_allow_html=True)
 
-                    # Divider
+                    # Horizontal Separator
                     st.markdown("<hr class='card-hr'/>", unsafe_allow_html=True)
 
-                    # Footer Row: Date & Priority
+                    # Footer Row: Due Date & Priority Dropdown
                     c_bot1, c_bot2 = st.columns([1.6, 1.4])
                     with c_bot1:
                         st.markdown(
