@@ -396,114 +396,102 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS for compact, more polished cards
+# CSS for Elevated, Vibrant Dashboard Look
 # -----------------------
 st.markdown(
     """
     <style>
+    /* Clean, modern light-slate dashboard theme */
     .stApp {
-        background: linear-gradient(180deg, #071018 0%, #0c141d 100%);
-        color: #ebf3ff;
+        background: radial-gradient(circle at top right, #f4f6fc, #e9edf6);
+        color: #1e293b;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
 
     .main .block-container {
-        padding-top: 0.75rem;
+        padding-top: 1.5rem;
         padding-bottom: 3rem;
+        max-width: 1250px;
     }
 
-    /* Reduce overall vertical spacing */
+    /* Sidebar Styling */
     .stSidebar > div:first-child {
-        background: rgba(17, 23, 30, 0.9);
-        border-right: 1px solid rgba(255,255,255,0.03);
+        background: #ffffff;
+        border-right: 1px solid #e2e8f0;
+        box-shadow: 2px 0 10px rgba(0,0,0,0.02);
     }
 
-    /* Buttons */
+    /* Primary Buttons Styling */
     .stButton > button {
-        border-radius: 10px !important;
-        min-width: 100px !important;
-        min-height: 38px !important;
-        padding: 7px 12px !important;
-        font-size: 14px !important;
+        border-radius: 8px !important;
         font-weight: 600 !important;
+        transition: all 0.2s ease-in-out;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
     }
 
-    /* Cards */
+    /* Polished Assignment Cards */
     .assignment-card {
-        width: 360px;
-        background: linear-gradient(180deg, rgba(15,20,26,0.96), rgba(9,13,17,0.95));
-        border: 1px solid rgba(255,255,255,0.04);
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-left: 5px solid #3b82f6;
         border-radius: 12px;
-        box-shadow:
-            0 12px 24px rgba(4, 8, 12, 0.45),
-            inset 0 1px 0 rgba(255,255,255,0.02);
-        padding: 12px 12px 10px 12px;
-        margin: 0 0 16px 0;
-        box-sizing: border-box;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+        padding: 16px;
+        margin-bottom: 16px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    
+    .assignment-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
     }
 
     .assignment-card .title {
-        font-size: 18px;
-        font-weight: 800;
-        line-height: 1.2;
-        color: #f4f8ff;
+        font-size: 17px;
+        font-weight: 700;
+        color: #0f172a;
         margin: 0;
-        word-wrap: break-word;
     }
 
     .course-badge {
         display: inline-block;
         font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.04em;
+        font-weight: 700;
+        letter-spacing: 0.05em;
         text-transform: uppercase;
-        color: #cbd5ff;
-        background: rgba(99,102,241,0.12);
-        border: 1px solid rgba(99,102,241,0.14);
-        border-radius: 8px;
-        padding: 5px 8px;
-        margin: 0 8px 0 0;
-        white-space: nowrap;
-    }
-
-    .meta-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 8px;
+        color: #1d4ed8;
+        background: #eff6ff;
+        border: 1px solid #dbeafe;
+        border-radius: 6px;
+        padding: 4px 8px;
+        margin-right: 8px;
     }
 
     .card-top {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 8px;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
     }
 
     .title-wrap {
         display: flex;
         align-items: center;
         gap: 8px;
-        min-width: 0;
         flex: 1;
-    }
-
-    .tiny-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: rgba(255,255,255,0.20);
-        border: 1px solid rgba(255,255,255,0.08);
-        flex-shrink: 0;
+        min-width: 0;
     }
 
     .assignment-type {
         font-size: 12px;
-        font-weight: 700;
-        color: #f7b0b9;
-        letter-spacing: 0.02em;
-        margin: 0 0 10px 0;
+        font-weight: 600;
+        color: #64748b;
+        margin-bottom: 12px;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -511,169 +499,103 @@ st.markdown(
 
     .type-pin {
         display: inline-block;
-        width: 9px;
-        height: 9px;
-        border-radius: 2px;
-        background: #ff5d5d;
-        transform: rotate(45deg);
-        box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
-    }
-
-    .action-row {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 10px;
-    }
-
-    .action-button {
-        flex: 1;
-        min-width: 0;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #f43f5e;
     }
 
     .footer-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 10px;
         padding-top: 10px;
-        border-top: 1px solid rgba(255,255,255,0.04);
-        margin-top: 2px;
+        border-top: 1px solid #f1f5f9;
+        margin-top: 8px;
     }
 
     .due-text {
         display: flex;
         align-items: center;
-        gap: 8px;
-        color: #dfe9f7;
+        gap: 6px;
+        color: #475569;
         font-weight: 600;
         font-size: 12px;
     }
 
     .days-badge {
-        display: inline-block;
-        background: rgba(255,255,255,0.02);
-        border: 1px solid rgba(255,255,255,0.04);
-        border-radius: 8px;
-        padding: 4px 8px;
-        font-weight: 700;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 3px 6px;
+        font-weight: 600;
         font-size: 11px;
-        color: #dfe9f7;
-    }
-
-    .inline-priority {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 12px;
-        color: #a9bad3;
-        font-weight: 700;
+        color: #334155;
     }
 
     .status-pill {
         display: inline-block;
         border-radius: 999px;
-        padding: 6px 10px;
+        padding: 4px 10px;
         font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.02em;
-        border: 1px solid transparent;
+        font-weight: 700;
     }
 
     .status-not-started {
-        background: rgba(220,38,38,0.08);
-        color: #ffb7b7;
-        border-color: rgba(220,38,38,0.06);
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fee2e2;
     }
 
     .status-in-progress {
-        background: rgba(234,179,8,0.08);
-        color: #fbe69b;
-        border-color: rgba(234,179,8,0.08);
+        background: #fefce8;
+        color: #ca8a04;
+        border: 1px solid #fef9c3;
     }
 
     .status-done {
-        background: rgba(16,185,129,0.08);
-        color: #baf7d6;
-        border-color: rgba(16,185,129,0.08);
-    }
-
-    .compact-select {
-        background: rgba(255,255,255,0.02);
-        color: #e6eef9;
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 8px;
-        padding: 6px 10px;
-        font-size: 12px;
-        min-width: 100px;
-    }
-
-    .toolbar-row {
-        display: flex;
-        justify-content: flex-end;
-        gap: 10px;
-        margin-top: 8px;
-    }
-
-    .toolbar-btn {
-        min-width: 120px !important;
-        padding: 8px 12px !important;
+        background: #f0fdf4;
+        color: #16a34a;
+        border: 1px solid #dcfce7;
     }
 
     .top-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 16px;
-        margin-bottom: 12px;
-    }
-
-    .title-stack {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
+        margin-bottom: 8px;
     }
 
     .app-title {
-        font-size: 34px;
-        font-weight: 900;
-        color: #edf2ff;
+        font-size: 28px;
+        font-weight: 800;
+        color: #0f172a;
+        letter-spacing: -0.03em;
         margin: 0;
-        letter-spacing: -0.04em;
     }
 
     .app-subtitle {
         font-size: 13px;
-        color: #8ca0ba;
+        color: #64748b;
         margin: 0;
     }
 
     .banner {
         padding: 10px 16px;
-        border-radius: 9px;
-        background: linear-gradient(90deg, rgba(75, 93, 155, 0.12), rgba(59,130,246,0.02));
-        border: 1px solid rgba(99,102,241,0.1);
-        color: #cfe0ff;
+        border-radius: 10px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+        color: #334155;
         text-align: center;
-        font-weight: 700;
-        margin: 14px 0 18px 0;
+        font-weight: 600;
+        margin: 12px 0 20px 0;
     }
 
-    .search-sort-row {
-        display: grid;
-        grid-template-columns: 1.5fr 0.7fr;
-        gap: 16px;
-        align-items: center;
-        margin-bottom: 20px;
-    }
-
-    /* Match sidebar dark look */
-    .stSidebar .stButton > button {
-        width: 100%;
-    }
-
-    /* Make select labels less noisy */
-    .stSelectbox label {
-        color: #a8b7c9 !important;
+    .toolbar-row {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
     }
     </style>
     """,
@@ -693,14 +615,14 @@ if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
 
 def render_header():
-    left, right = st.columns([3, 1])
+    left, right = st.columns([2.5, 1.5])
     with left:
         st.markdown(
             """
             <div class="top-header">
                 <div class="title-stack">
-                    <div class="app-title">📋 Assignment Tracker</div>
-                    <div class="app-subtitle">Live application syncing — keep your classes up to date</div>
+                    <div class="app-title">🚀 Assignment Tracker</div>
+                    <div class="app-subtitle">Stay on top of your classes with synced workspace management</div>
                 </div>
             </div>
             """,
@@ -708,12 +630,16 @@ def render_header():
         )
     with right:
         st.markdown('<div class="toolbar-row">', unsafe_allow_html=True)
-        if st.button("🧹 Clear Completed", key="toolbar_clear"):
-            st.session_state["_clear_completed_flag"] = True
-        if st.button("➕ Add Assignment", key="toolbar_add"):
-            st.session_state["_open_add_modal"] = True
-        if st.button("📚 Manage Classes", key="toolbar_classes"):
-            st.session_state["_open_manage_courses"] = True
+        col_c, col_a, col_m = st.columns(3)
+        with col_c:
+            if st.button("🧹 Clear", key="toolbar_clear", help="Clear completed tasks"):
+                st.session_state["_clear_completed_flag"] = True
+        with col_a:
+            if st.button("➕ Add", key="toolbar_add", help="Add new assignment"):
+                st.session_state["_open_add_modal"] = True
+        with col_m:
+            if st.button("📚 Classes", key="toolbar_classes", help="Manage courses"):
+                st.session_state["_open_manage_courses"] = True
         st.markdown("</div>", unsafe_allow_html=True)
 
 render_header()
@@ -729,7 +655,7 @@ if st.session_state.get("_clear_completed_flag", False):
     st.experimental_rerun()
 
 today_str = datetime.today().strftime("%A, %B %d, %Y")
-st.markdown(f"<div class='banner'>📅 Today's Matrix Operations Calendar: {today_str}</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='banner'>📅 Today: {today_str}</div>", unsafe_allow_html=True)
 
 # -----------------------
 # Sidebar sign in / sign up
@@ -737,7 +663,7 @@ st.markdown(f"<div class='banner'>📅 Today's Matrix Operations Calendar: {toda
 user = current_user()
 if user:
     email = user.get("email") or (user.get("user_metadata") or {}).get("email")
-    st.sidebar.write(f"Signed in as:\n{email or user.get('id') or 'unknown'}")
+    st.sidebar.write(f"Signed in as:\n**{email or user.get('id') or 'unknown'}**")
     if st.sidebar.button("Sign out", key="sidebar_signout"):
         sign_out()
 else:
@@ -831,9 +757,9 @@ if st.session_state.get("_open_manage_courses", False):
 # -----------------------
 search_col, sort_col = st.columns([2.2, 1])
 with search_col:
-    search_q = st.text_input("Search tasks or subjects...", key="main_search")
+    search_q = st.text_input("Search tasks or subjects...", key="main_search", label_visibility="collapsed", placeholder="🔍 Search tasks or subjects...")
 with sort_col:
-    sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="main_sort")
+    sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="main_sort", label_visibility="collapsed")
 
 # -----------------------
 # Add modal
@@ -952,7 +878,7 @@ def open_edit_modal(aid: str):
 # render cards
 st.markdown("<div class='cards-wrap'>", unsafe_allow_html=True)
 if df.empty:
-    st.markdown("<div style='padding:50px 0; text-align:center; color:#9aa6ba;'>🎉 No assignments yet — your workspace is clear.</div>", unsafe_allow_html=True)
+    st.markdown("<div style='padding:50px 0; text-align:center; color:#64748b;'>🎉 No assignments yet — your workspace is clear.</div>", unsafe_allow_html=True)
 else:
     for _, row in df.iterrows():
         aid = row.get("id")
@@ -981,7 +907,6 @@ else:
             st.markdown(
                 f"""
                 <div class='title-wrap'>
-                    <span class='tiny-dot'></span>
                     <span class='course-badge'>{course}</span>
                     <div class='title'>{title}</div>
                 </div>
@@ -1032,7 +957,7 @@ else:
                 updated["priority"] = selected_prio
                 upsert_assignments([updated])
                 st.experimental_rerun()
-            st.markdown(f"<div style='margin-top:8px; text-align:right;'><span class='status-pill {status_cls}'>{status}</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='margin-top:6px; text-align:right;'><span class='status-pill {status_cls}'>{status}</span></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("</div>", unsafe_allow_html=True)
