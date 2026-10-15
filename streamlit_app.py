@@ -1,28 +1,23 @@
 """
-Assignment Tracker — Polished UI pass
+Assignment Tracker — Polished visual update (final UI pass)
 
-This file is an improved replacement for streamlit_app.py that focuses on
-visual polish, clearer card boundaries, reliable button layout, and readable
-text. It preserves the existing functionality:
-- Supabase auth wrappers (optional, via Streamlit secrets)
-- JSON fallback persistence for assignments and classes
-- Add / Edit modals, Manage Classes modal
-- Search, sort, clear completed, add/edit/delete/mark-done actions
+This Streamlit app file implements:
+- Supabase-auth helpers (compatible with several supabase-py versions) + JSON fallback
+- Manage Classes modal (keeps courses in courses.json)
+- Centered Add / Edit modals (complete forms)
+- Compact, highly-stylized assignment cards that match the requested visuals:
+  - left thumbnail/preview box
+  - course badge, radio selector, edit control and status dropdown
+  - large title, type icon/label
+  - footer with due date (MM/DD/YYYY), days-left badge, Priority select and status pill
+  - precise spacing, outlines, multi-layer shadows and gradients
+- Search, sort and top toolbar (Clear Completed / Add Assignment / Manage Classes)
+- Inline priority and status editing (selectboxes in each card with immediate persist)
+- Robust keying and session-state driven modal/action flow to avoid crashes
 
-What's improved in this version:
-- Cards are compact (fixed max width), clearly separated with stronger
-  borders, multi-layer shadows, and subtle gradients.
-- Buttons are larger with consistent spacing and don't overlap.
-- Priority is displayed as a clearly visible badge (never left blank).
-- Title and other text wrap properly; no truncated text.
-- Action buttons inside each card are spaced and readable.
-- The top toolbar buttons are larger and spaced out.
-- The calendar banner uses the current date (auto-rotates daily).
-
-Notes:
-- Streamlit CSS is used to style built-in Streamlit buttons and inputs.
-- We keep usage of Streamlit primitives (st.button, st.columns, st.modal).
-- If you want pixel-perfect matching to a mockup, we can fine-tune colors/spacing further.
+Drop this file into your app directory (replace your existing streamlit_app.py),
+install requirements (streamlit, pandas, supabase) and run:
+    streamlit run streamlit_app.py
 """
 from __future__ import annotations
 
@@ -34,15 +29,23 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
-from supabase import Client, create_client
+
+# Optional supabase support
+try:
+    from supabase import Client, create_client  # type: ignore
+except Exception:
+    Client = None
+    create_client = None  # type: ignore
 
 # -----------------------
-# Config / Files
+# Files & config
 # -----------------------
 DATA_FILE = Path("data.json")
 COURSES_FILE = Path("courses.json")
 
-# Supabase credentials (optional)
+# Read Supabase creds from Streamlit secrets (optional)
+SUPABASE_URL = None
+SUPABASE_KEY = None
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"]
     SUPABASE_KEY = st.secrets["supabase"]["key"]
@@ -50,14 +53,14 @@ except Exception:
     SUPABASE_URL = None
     SUPABASE_KEY = None
 
-sb: Optional[Client] = None
-if SUPABASE_URL and SUPABASE_KEY:
+sb: Optional["Client"] = None
+if SUPABASE_URL and SUPABASE_KEY and create_client:
     try:
-        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+        sb = create_client(SUPABASE_URL, SUPABASE_KEY)  # type: ignore
     except Exception:
         sb = None
 
-# Options
+# Option lists (user-specified in conversation)
 STATUS_OPTIONS = ["Not Started", "In Progress", "Done"]
 PRIORITY_OPTIONS = ["Low", "Medium", "High"]
 TYPE_OPTIONS = ["Essay", "Presentation", "Homework", "Test & Quizzes", "Other"]
@@ -71,7 +74,7 @@ SORT_OPTIONS = [
 st.set_page_config(page_title="Assignment Tracker", layout="wide")
 
 # -----------------------
-# Small helpers
+# Utility helpers
 # -----------------------
 def _to_dict(obj: Any) -> Optional[Dict[str, Any]]:
     if obj is None:
@@ -79,10 +82,10 @@ def _to_dict(obj: Any) -> Optional[Dict[str, Any]]:
     if isinstance(obj, dict):
         return obj
     for method_name in ("dict", "model_dump"):
-        method = getattr(obj, method_name, None)
-        if callable(method):
+        m = getattr(obj, method_name, None)
+        if callable(m):
             try:
-                v = method()
+                v = m()
                 if isinstance(v, dict):
                     return v
             except Exception:
@@ -99,7 +102,7 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
     if isinstance(res, dict):
         mapped = _to_dict(res) or res
         return {
-            "error": res.get("error", None) if isinstance(res, dict) else None,
+            "error": res.get("error") if isinstance(res, dict) else None,
             "data": res.get("data") if isinstance(res, dict) and "data" in res else mapped,
             "raw": mapped,
         }
@@ -119,7 +122,7 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
 
 
 # -----------------------
-# Auth helpers (robust)
+# Auth wrappers (robust)
 # -----------------------
 def sign_up(email: str, password: str) -> Dict[str, Any]:
     auth = getattr(sb, "auth", None) if sb else None
@@ -210,42 +213,42 @@ def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
         return None
 
     if isinstance(response, dict):
-        user = first_user_from_mapping(response)
-        if user:
-            return user
-        raw = response.get("raw") if isinstance(response, dict) else None
+        u = first_user_from_mapping(response)
+        if u:
+            return u
+        raw = response.get("raw")
         if isinstance(raw, dict):
-            user = first_user_from_mapping(raw)
-            if user:
-                return user
-        data = response.get("data") if isinstance(response, dict) else None
+            u = first_user_from_mapping(raw)
+            if u:
+                return u
+        data = response.get("data")
         if isinstance(data, dict):
-            user = first_user_from_mapping(data)
-            if user:
-                return user
+            u = first_user_from_mapping(data)
+            if u:
+                return u
 
-    for attr_name in ["user", "session", "data", "raw"]:
+    for attr in ("user", "session", "data", "raw"):
         try:
-            obj = getattr(response, attr_name, None)
+            obj = getattr(response, attr, None)
         except Exception:
             obj = None
         if obj is not None:
             if isinstance(obj, dict):
-                user = first_user_from_mapping(obj)
-                if user:
-                    return user
+                u = first_user_from_mapping(obj)
+                if u:
+                    return u
             else:
                 mapped = _to_dict(obj)
                 if isinstance(mapped, dict):
-                    user = first_user_from_mapping(mapped)
-                    if user:
-                        return user
+                    u = first_user_from_mapping(mapped)
+                    if u:
+                        return u
 
     mapped = _to_dict(response)
     if isinstance(mapped, dict):
-        user = first_user_from_mapping(mapped)
-        if user:
-            return user
+        u = first_user_from_mapping(mapped)
+        if u:
+            return u
     return None
 
 
@@ -274,7 +277,7 @@ def current_user() -> Optional[Dict[str, Any]]:
 
 
 # -----------------------
-# Persistence (JSON fallback)
+# Persistence (JSON)
 # -----------------------
 def _read_data_file() -> List[Dict[str, Any]]:
     if not DATA_FILE.exists():
@@ -350,7 +353,7 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Date helpers & formatting
+# Date formatting & helpers
 # -----------------------
 def parse_date_iso_or_empty(s: Any) -> Optional[date]:
     if s is None:
@@ -409,116 +412,106 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# Polished styling (stronger outlines, shadows, spacing)
+# Visual CSS: carefully tuned to match provided mockups
 # -----------------------
 st.markdown(
     """
     <style>
-    /* Page background & base font */
-    .stApp {
-        background: linear-gradient(180deg,#071019,#0b1420);
-        color: #e6eef9;
-        font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-    }
+    /* Page base */
+    .stApp { background: linear-gradient(180deg,#081018 0%, #0b1219 100%); color:#e6eef9; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
 
-    /* Header */
-    .app-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-    .app-title { font-size:34px; font-weight:800; color:#f8fafc; margin:0; }
+    /* Header area */
+    .header-area { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
+    .app-title { font-size:34px; font-weight:900; color:#f8fafc; margin:0; display:flex; align-items:center; gap:12px; }
+    .app-sub { color:#9aa6ba; font-size:14px; margin-top:6px; }
 
-    /* Toolbar buttons — larger and spaced */
-    .toolbar-btn { margin-left:8px; margin-right:8px; }
+    /* Top toolbar buttons (pill with subtle borders and shadows) */
+    .toolbar { display:flex; gap:12px; align-items:center; justify-content:flex-end; }
     .stButton>button {
         padding:10px 16px !important;
         font-size:14px !important;
-        border-radius:10px !important;
-        min-width:130px !important;
+        border-radius:12px !important;
+        min-width:140px;
     }
-    /* make toolbar group align right */
-    .toolbar-right { display:flex; gap:12px; align-items:center; justify-content:flex-end; }
+    /* Small green primary */
+    .btn-clear { background: linear-gradient(90deg,#0f7a4b,#0d8d5a) !important; color:white !important; border: none !important; box-shadow: 0 8px 18px rgba(7, 102, 66, 0.18); }
+    .btn-add { background: linear-gradient(90deg,#6d5ef8,#7b6dfb) !important; color:white !important; border: none !important; box-shadow: 0 8px 18px rgba(81, 60, 230, 0.18); }
 
-    /* Search input bigger */
-    .stTextInput>div>div>input {
-        padding:14px !important;
-        border-radius:10px !important;
-        background: rgba(255,255,255,0.02) !important;
-        color: #e6eef9 !important;
-    }
+    /* Date banner */
+    .date-banner { padding:12px; border-radius:10px; background: linear-gradient(90deg, rgba(99,102,241,0.06), rgba(59,130,246,0.02)); color:#bcd2ff; text-align:center; margin:12px 0; border:1px solid rgba(99,102,241,0.04); }
 
-    /* Cards container: centered with wrap */
-    .cards-wrap { display:flex; flex-wrap:wrap; gap:18px; align-items:flex-start; justify-content:flex-start; padding-top:12px; }
+    /* Search + sort container */
+    .search-row { display:flex; gap:18px; align-items:center; justify-content:space-between; margin-bottom:18px; }
+    .search-box input { padding:14px !important; border-radius:10px !important; background: rgba(255,255,255,0.02) !important; color:#e6eef9 !important; }
 
-    /* Card - compact fixed width, multi-layer shadows, clear outline */
+    /* Cards container */
+    .cards-wrap { display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start; }
+
+    /* Card: compact box like mockup */
     .card {
-        width: 330px;
-        min-height: 120px;
-        padding: 16px;
-        border-radius: 14px;
-        background: linear-gradient(180deg, rgba(20,25,30,0.9), rgba(12,16,20,0.85));
-        border: 1px solid rgba(255,255,255,0.04);
-        box-shadow:
-            0 10px 30px rgba(2,6,23,0.55),
-            0 2px 8px rgba(2,6,23,0.35),
-            inset 0 1px 0 rgba(255,255,255,0.02);
+        width: 420px;
+        background: linear-gradient(180deg, rgba(12,16,20,0.95), rgba(10,12,16,0.92));
+        border-radius: 12px;
+        padding: 14px;
+        border: 1px solid rgba(255,255,255,0.03);
+        box-shadow: 0 18px 40px rgba(2,6,23,0.6), inset 0 1px 0 rgba(255,255,255,0.012);
         transition: transform 0.12s ease, box-shadow 0.12s ease;
     }
-    .card:hover { transform: translateY(-6px); box-shadow: 0 18px 40px rgba(2,6,23,0.65), 0 6px 12px rgba(2,6,23,0.45); }
+    .card:hover { transform: translateY(-6px); box-shadow: 0 28px 56px rgba(2,6,23,0.7); }
 
+    .card-row { display:flex; gap:12px; align-items:flex-start; }
+    .thumbnail {
+        width:160px;
+        height:84px;
+        border-radius:10px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.003));
+        border:1px solid rgba(255,255,255,0.02);
+        box-shadow: inset 0 2px 6px rgba(255,255,255,0.01);
+    }
+
+    .card-content { flex:1; display:flex; flex-direction:column; gap:6px; }
+    .meta-row { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+    .left-meta { display:flex; gap:8px; align-items:center; }
     .course-badge {
-        display:inline-block;
-        padding:7px 12px;
-        border-radius:10px;
-        background: linear-gradient(90deg, rgba(99,102,241,0.18), rgba(79,70,229,0.08));
-        color:#e6eef9; font-weight:800; font-size:12px;
-        border: 1px solid rgba(99,102,241,0.08);
+        display:inline-block; padding:6px 10px; border-radius:8px; font-weight:800; font-size:12px;
+        color:#c7d2fe; background: linear-gradient(90deg, rgba(99,102,241,0.14), rgba(79,70,229,0.06)); border:1px solid rgba(99,102,241,0.06);
+    }
+    .title { font-weight:800; font-size:20px; color:#f8fafc; margin:0; }
+    .atype { color:#fda4af; font-weight:600; font-size:13px; margin-top:4px; }
+
+    .actions-row { display:flex; gap:12px; margin-top:8px; }
+    .card .stButton>button { min-width:110px !important; padding:8px 12px !important; font-size:13px !important; border-radius:10px !important; }
+
+    .footer { display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:12px; }
+    .small-muted { color:#98a6b8; font-size:13px; }
+
+    .days-badge {
+        padding:6px 10px; border-radius:8px; background: rgba(255,255,255,0.02); color:#cbd5e1; border:1px solid rgba(255,255,255,0.02); font-weight:700;
     }
 
-    .title { font-weight:800; font-size:18px; margin-top:6px; margin-bottom:8px; color:#e6eef9; word-wrap:break-word; white-space:normal; }
-
-    .atype { color:#fda4af; margin-bottom:10px; font-weight:600; font-size:13px; }
-
-    .card .stButton>button { min-width:110px !important; padding:8px 12px !important; font-size:13px !important; margin-right:8px; border-radius:10px !important; }
-
-    .card-actions { display:flex; gap:12px; align-items:center; margin-top:8px; margin-bottom:8px; }
-
-    .pill {
-        display:inline-block;
-        padding:6px 10px;
-        border-radius:999px;
-        font-weight:700;
-        font-size:12px;
-    }
-    .pill-not-started { background: rgba(239,68,68,0.06); color:#fccaca; border: 1px solid rgba(239,68,68,0.06); }
-    .pill-in-progress { background: rgba(250,204,21,0.06); color:#fef08a; border: 1px solid rgba(250,204,21,0.06); }
-    .pill-done { background: rgba(34,197,94,0.06); color:#bbf7d0; border: 1px solid rgba(34,197,94,0.06); }
-
-    .priority-badge {
-        display:inline-block;
-        padding:6px 10px;
-        border-radius:10px;
-        font-weight:700;
-        font-size:13px;
-        background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-        border: 1px solid rgba(255,255,255,0.03);
-        color:#d1fae5;
+    .priority-select select {
+        padding:6px 10px; border-radius:8px; background: rgba(255,255,255,0.02); color:#e6eef9;
     }
 
-    .small-muted { color:#9ca3af; font-size:13px; }
+    /* status pill */
+    .status-pill { display:inline-block; padding:7px 12px; border-radius:12px; font-weight:800; font-size:13px; }
+    .st-not-started { background: linear-gradient(90deg, rgba(220,38,38,0.06), rgba(220,38,38,0.02)); color:#ffc4c4; border:1px solid rgba(220,38,38,0.05); }
+    .st-in-progress { background: linear-gradient(90deg, rgba(234,179,8,0.06), rgba(234,179,8,0.02)); color:#fff1a8; border:1px solid rgba(234,179,8,0.05); }
+    .st-done { background: linear-gradient(90deg, rgba(16,185,129,0.06), rgba(16,185,129,0.02)); color:#baf7d6; border:1px solid rgba(16,185,129,0.05); }
 
-    /* Footer spacing */
-    .card-footer { display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:12px; }
+    /* make select boxes fit */
+    select { background: rgba(255,255,255,0.015) !important; color:#e6eef9 !important; padding:6px 10px !important; border-radius:8px !important; }
 
-    /* Improve visual separation on the page */
-    .section-divider { height:1px; background: linear-gradient(90deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02)); margin-top:12px; margin-bottom:12px; border-radius:2px; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # -----------------------
-# Top header + toolbar
+# Top header and toolbar behavior (safe flags)
 # -----------------------
-if "_action_clear_completed" not in st.session_state:
-    st.session_state["_action_clear_completed"] = False
+if "_clear_completed_flag" not in st.session_state:
+    st.session_state["_clear_completed_flag"] = False
 if "_open_add_modal" not in st.session_state:
     st.session_state["_open_add_modal"] = False
 if "_open_manage_courses" not in st.session_state:
@@ -526,107 +519,107 @@ if "_open_manage_courses" not in st.session_state:
 if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
 
-def render_top_toolbar():
-    left_col, right_col = st.columns([3, 1])
-    with left_col:
-        st.markdown("<div class='app-header'><div><h1 class='app-title'>📋 Assignment Tracker</h1><div class='small-muted'>Live application syncing — keep your classes up to date</div></div></div>", unsafe_allow_html=True)
-    with right_col:
-        # toolbar group
-        with st.container():
-            st.markdown("<div class='toolbar-right'>", unsafe_allow_html=True)
-            if st.button("🧹 Clear Completed", key="clear_completed_button"):
-                st.session_state["_action_clear_completed"] = True
-            if st.button("➕ Add Assignment", key="add_assignment_button"):
-                st.session_state["_open_add_modal"] = True
-            if st.button("📚 Manage Classes", key="manage_classes_button"):
-                st.session_state["_open_manage_courses"] = True
-            st.markdown("</div>", unsafe_allow_html=True)
+def render_header_and_toolbar():
+    left, right = st.columns([3, 1])
+    with left:
+        st.markdown("<div class='header-area'><div><div class='app-title'>📋 Assignment Tracker</div><div class='app-sub'>Live application syncing — keep your classes up to date</div></div></div>", unsafe_allow_html=True)
+    with right:
+        st.markdown("<div class='toolbar'>", unsafe_allow_html=True)
+        if st.button("🧹 Clear Completed", key="clear_completed"):
+            st.session_state["_clear_completed_flag"] = True
+        # styled add button using css class - we apply style by calling st.button then color by CSS is limited,
+        # to keep color we will set style via classes that target generic buttons — we can't pass class directly,
+        # but we highlight by using separate keys and rely on CSS gradients above.
+        if st.button("➕ Add Assignment", key="add_assignment"):
+            st.session_state["_open_add_modal"] = True
+        if st.button("📚 Manage Classes", key="manage_classes"):
+            st.session_state["_open_manage_courses"] = True
+        st.markdown("</div>", unsafe_allow_html=True)
 
-render_top_toolbar()
+render_header_and_toolbar()
 
-# handle clear completed action outside render
-if st.session_state.get("_action_clear_completed", False):
+# Perform actions after render so we don't call rerun inside render function
+if st.session_state.get("_clear_completed_flag"):
     user = current_user()
     if user:
-        all_rows = _read_data_file()
         uid = user.get("id") or user.get("sub") or user.get("user_id")
-        remaining = [r for r in all_rows if not (r.get("user_id") == uid and r.get("status") == "Done")]
+        rows = _read_data_file()
+        remaining = [r for r in rows if not (r.get("user_id") == uid and r.get("status") == "Done")]
         _write_data_file(remaining)
-    st.session_state["_action_clear_completed"] = False
+    st.session_state["_clear_completed_flag"] = False
     st.experimental_rerun()
 
-# date banner (auto-updates daily)
+# Date banner (auto-updates)
 today_str = datetime.today().strftime("%A, %B %d, %Y")
-st.markdown(f"<div style='margin-top:10px; margin-bottom:12px; padding:10px; border-radius:8px; background: linear-gradient(90deg, rgba(79,70,229,0.06), rgba(6,182,212,0.02)); color:#c7d2fe; text-align:center;'>📅 Today's Matrix Operations Calendar: {today_str}</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='date-banner'>📅 Today's Matrix Operations Calendar: {today_str}</div>", unsafe_allow_html=True)
 
 # -----------------------
-# Sidebar auth
+# Sidebar auth form
 # -----------------------
 user = current_user()
 if user:
     email = user.get("email") or (user.get("user_metadata") or {}).get("email")
-    st.sidebar.write(f"Signed in as: {email or user.get('id') or 'unknown'}")
-    if st.sidebar.button("Sign out", key="signout_button"):
+    st.sidebar.markdown(f"**Signed in as:**  \n[{email}](#)")
+    if st.sidebar.button("Sign out", key="sidebar_signout"):
         sign_out()
 else:
     st.sidebar.header("Sign in / Sign up")
-    auth_mode = st.sidebar.radio("Mode", ["Sign in", "Sign up"])
+    mode = st.sidebar.radio("Mode", ["Sign in", "Sign up"])
     with st.sidebar.form("auth_form"):
-        s_email = st.text_input("Email", key="auth_email")
-        s_password = st.text_input("Password", type="password", key="auth_pw")
-        submitted = st.form_submit_button(auth_mode)
+        sin_email = st.text_input("Email", key="sin_email")
+        sin_pw = st.text_input("Password", type="password", key="sin_pw")
+        submitted = st.form_submit_button(mode)
         if submitted:
-            e = s_email.strip()
-            p = s_password.strip()
-            if auth_mode == "Sign up":
-                res = sign_up(e, p)
-                if res.get("error"):
-                    st.sidebar.error(f"Sign up failed: {res.get('error')}")
+            e = sin_email.strip()
+            p = sin_pw.strip()
+            if mode == "Sign up":
+                r = sign_up(e, p)
+                if r.get("error"):
+                    st.sidebar.error(f"Sign up failed: {r.get('error')}")
                 else:
                     st.sidebar.success("Sign up successful. Check your email if needed.")
             else:
-                res = sign_in(e, p)
-                err = res.get("error")
-                data = res.get("data") if isinstance(res, dict) else getattr(res, "data", None)
-                user_obj = extract_user_from_auth_response(res)
-                if not user_obj and isinstance(data, dict):
-                    user_obj = data.get("user") or (data.get("session") or {}).get("user")
+                r = sign_in(e, p)
+                err = r.get("error")
+                data = r.get("data")
+                u = extract_user_from_auth_response(r)
+                if not u and isinstance(data, dict):
+                    u = data.get("user") or (data.get("session") or {}).get("user")
                 if err:
                     st.sidebar.error(f"Sign in failed: {err}")
-                elif not user_obj:
+                elif not u:
                     st.sidebar.error("Sign in failed: could not extract user. Check credentials or config.")
                 else:
-                    st.session_state.user = user_obj
+                    st.session_state.user = u
                     try:
                         st.experimental_rerun()
                     except Exception:
                         pass
 
-# require sign-in
+# Require sign in to proceed
 user = current_user()
 if not user:
-    st.info("Please sign in or sign up in the sidebar to manage your assignments.")
+    st.info("Please sign in or sign up to manage your assignments.")
     st.stop()
-
 user_id = user.get("id") or user.get("sub") or user.get("user_id")
 if not user_id:
-    st.error("Could not determine user id from Supabase user.")
+    st.error("Could not determine user id from auth response.")
     st.stop()
 
 # -----------------------
-# Manage classes modal
+# Manage Classes modal
 # -----------------------
 if st.session_state.get("_open_manage_courses", False):
     with st.modal("Manage Classes"):
-        st.subheader("Your Classes")
+        st.subheader("Manage Classes")
         courses = _read_courses_file()
-        to_remove = []
+        to_remove: List[str] = []
         for i, c in enumerate(courses):
-            a, b = st.columns([10,1])
+            a, b = st.columns([8, 1])
             with a:
                 st.write(f"• {c}")
             with b:
-                if st.button("Remove", key=f"remove_course_{i}"):
+                if st.button("Remove", key=f"rm_course_{i}"):
                     to_remove.append(c)
         if to_remove:
             courses = [c for c in courses if c not in to_remove]
@@ -634,6 +627,7 @@ if st.session_state.get("_open_manage_courses", False):
             st.success("Updated classes.")
             st.session_state["_open_manage_courses"] = False
             st.experimental_rerun()
+
         st.markdown("---")
         new_course = st.text_input("Add a new course (e.g., Math 101)", key="new_course_field")
         if st.button("Add Course", key="add_course_btn"):
@@ -648,39 +642,39 @@ if st.session_state.get("_open_manage_courses", False):
                     st.experimental_rerun()
                 else:
                     st.warning("That course is already in the list.")
-        if st.button("Close", key="close_manage_courses"):
+        if st.button("Close", key="close_courses_btn"):
             st.session_state["_open_manage_courses"] = False
             st.experimental_rerun()
 
 # -----------------------
 # Search + Sort row
 # -----------------------
-search_col, sort_col = st.columns([3,1])
+search_col, sort_col = st.columns([3, 1])
 with search_col:
-    search_q = st.text_input("Search tasks or subjects...", key="search_q")
+    search_q = st.text_input("Search tasks or subjects...", key="main_search")
 with sort_col:
-    sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="sort_by")
+    sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="main_sort")
 
 # -----------------------
-# Add modal
+# Add Assignment modal (centered)
 # -----------------------
 if st.session_state.get("_open_add_modal", False):
     st.session_state["_open_add_modal"] = False
     with st.modal("Create New Assignment"):
         courses = _read_courses_file()
-        with st.form("add_assignment_form"):
+        with st.form("add_form"):
             title = st.text_input("Assignment Name", key="add_title")
-            course_select = st.selectbox("Subject / Course (choose)", options=[""] + courses, key="add_course_select")
+            course_choice = st.selectbox("Subject / Course (choose)", options=[""] + courses, index=0, key="add_course_choice")
             course_free = st.text_input("Or type a course name", value="", key="add_course_free")
             status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
             due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
-            priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=0, key="add_priority")
+            priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_priority")
             atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
             eta = st.text_input("Estimated Duration (e.g., 30 mins)", key="add_eta")
             notes = st.text_area("Notes", value="", key="add_notes")
             submitted_add = st.form_submit_button("Add to Layout")
             if submitted_add:
-                course_val = course_free.strip() or course_select or ""
+                course_val = course_free.strip() or course_choice or ""
                 new_row = {
                     "id": str(uuid.uuid4()),
                     "user_id": user_id,
@@ -704,31 +698,29 @@ if st.session_state.get("_open_add_modal", False):
                 st.experimental_rerun()
 
 # -----------------------
-# Edit modal
+# Edit modal (triggered by setting _edit_assignment_id)
 # -----------------------
-if "_edit_assignment_id" not in st.session_state:
-    st.session_state["_edit_assignment_id"] = ""
 if st.session_state.get("_edit_assignment_id"):
     aid = st.session_state["_edit_assignment_id"]
     rows = _read_data_file()
     assignment = next((r for r in rows if r.get("id") == aid), None)
     if assignment:
-        with st.modal("Edit Assignment Details"):
-            with st.form("edit_assignment_form"):
+        with st.modal("Edit Assignment"):
+            with st.form("edit_form"):
                 title = st.text_input("Assignment Name", value=assignment.get("title", ""), key=f"edit_title_{aid}")
                 courses = _read_courses_file()
-                course_select = st.selectbox("Subject / Course (choose)", options=[""] + courses, index=0, key=f"edit_course_select_{aid}")
+                course_choice = st.selectbox("Subject / Course (choose)", options=[""] + courses, index=0, key=f"edit_course_choice_{aid}")
                 course_free = st.text_input("Or type a course name", value=assignment.get("course", ""), key=f"edit_course_free_{aid}")
-                status = st.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(assignment.get("status")) if assignment.get("status") in STATUS_OPTIONS else 0, key=f"edit_status_{aid}")
+                status = st.selectbox("Status", STATUS_OPTIONS, index=(STATUS_OPTIONS.index(assignment.get("status")) if assignment.get("status") in STATUS_OPTIONS else 0), key=f"edit_status_{aid}")
                 due_parsed = parse_date_iso_or_empty(assignment.get("due_date")) or date.today()
                 due = st.date_input("Due Date (MM/DD/YYYY)", value=due_parsed, key=f"edit_due_{aid}")
-                priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=PRIORITY_OPTIONS.index(assignment.get("priority")) if assignment.get("priority") in PRIORITY_OPTIONS else 0, key=f"edit_priority_{aid}")
-                atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=TYPE_OPTIONS.index(assignment.get("atype")) if assignment.get("atype") in TYPE_OPTIONS else 0, key=f"edit_atype_{aid}")
+                priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=(PRIORITY_OPTIONS.index(assignment.get("priority")) if assignment.get("priority") in PRIORITY_OPTIONS else 1), key=f"edit_priority_{aid}")
+                atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=(TYPE_OPTIONS.index(assignment.get("atype")) if assignment.get("atype") in TYPE_OPTIONS else 0), key=f"edit_atype_{aid}")
                 eta = st.text_input("Estimated Duration (e.g., 30 mins)", value=assignment.get("eta", ""), key=f"edit_eta_{aid}")
                 notes = st.text_area("Notes", value=assignment.get("notes", ""), key=f"edit_notes_{aid}")
                 submitted_edit = st.form_submit_button("Save Changes")
                 if submitted_edit:
-                    course_val = course_free.strip() or course_select or ""
+                    course_val = course_free.strip() or course_choice or ""
                     updated = {
                         "id": aid,
                         "user_id": user_id,
@@ -758,40 +750,43 @@ if st.session_state.get("_edit_assignment_id"):
         st.session_state["_edit_assignment_id"] = ""
 
 # -----------------------
-# Load assignments and render compact cards
+# Load assignments
 # -----------------------
-st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 if "df_cached" not in st.session_state:
     st.session_state.df_cached = fetch_assignments(user_id)
 else:
+    # refresh each run to pick up external edits
     st.session_state.df_cached = fetch_assignments(user_id)
+
 df = st.session_state.df_cached.copy()
 
-# Search filter
-search_q = st.session_state.get("search_q", "") if "search_q" in st.session_state else ""
+# Apply search
 if search_q:
     q = search_q.lower()
     df = df[df.apply(lambda r: q in str(r.get("title", "")).lower() or q in str(r.get("course", "")).lower() or q in str(r.get("atype", "")).lower(), axis=1)]
 
 # Sort
-sort_by = st.session_state.get("sort_by", SORT_OPTIONS[0]) if "sort_by" in st.session_state else SORT_OPTIONS[0]
 df = sort_df(df, sort_by)
 
-# Helper to open edit modal
-def open_edit_modal(assign_id: str):
-    st.session_state["_edit_assignment_id"] = assign_id
+st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+# Helper: open edit modal
+def open_edit(aid: str):
+    st.session_state["_edit_assignment_id"] = aid
     st.experimental_rerun()
 
-# Card rendering: each card is placed using a simple loop; CSS keeps them compact
+# -----------------------
+# Render assignment cards (careful layout)
+# -----------------------
 st.markdown("<div class='cards-wrap'>", unsafe_allow_html=True)
 if df.empty:
-    st.markdown("<div style='padding:60px; text-align:center; color:#9ca3af'>🎉 GOOOOOOOODDD BOOOOYYYYY, YOU FINISHED ALL YOUR HOMEWORK, YOU GET THE A+++++++++</div>", unsafe_allow_html=True)
+    st.markdown("<div style='padding:60px; text-align:center; color:#9ca3af'>🎉 All done — no assignments found.</div>", unsafe_allow_html=True)
 else:
     items = df.to_dict(orient="records")
     for item in items:
         aid = item.get("id")
+        title = item.get("title") or "(No title)"
         course = item.get("course") or "Unspecified"
-        title = item.get("title") or "(no title)"
         atype = item.get("atype") or ""
         due_parsed = parse_date_iso_or_empty(item.get("due_date"))
         due_text = format_mdy(due_parsed)
@@ -799,47 +794,95 @@ else:
         priority = item.get("priority") or "Medium"
         status = item.get("status") or "Not Started"
 
-        # map status to pill class
-        status_cls = "pill-not-started"
-        if status == "In Progress":
-            status_cls = "pill-in-progress"
-        elif status == "Done":
-            status_cls = "pill-done"
-
-        # Render card markup (use native buttons for actions)
         st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown(f"<div style='display:flex; align-items:center; gap:12px;'><div class='course-badge'>{course}</div><div style='flex:1;'><div class='title'>{title}</div></div></div>", unsafe_allow_html=True)
+        # Top row: thumbnail + content
+        st.markdown("<div class='card-row'>", unsafe_allow_html=True)
+        # thumbnail placeholder
+        st.markdown(f"<div class='thumbnail' aria-hidden='true'></div>", unsafe_allow_html=True)
+        # content column
+        # meta row: left meta (radio + course badge + title) and actions (edit + status select)
+        st.markdown("<div class='card-content'>", unsafe_allow_html=True)
+        # meta: radio and course badge + title
+        st.markdown("<div class='meta-row'>", unsafe_allow_html=True)
+        # left meta
+        left, right = st.columns([7,3], gap="small")
+        with left:
+            c1, c2 = st.columns([1,15], gap="small")
+            with c1:
+                # simple radio-like circle (visual only)
+                st.markdown("<div style='width:18px; height:18px; border-radius:50%; border:2px solid rgba(255,255,255,0.06);'></div>", unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"<div style='display:flex; gap:10px; align-items:center'><div class='course-badge'>{course}</div><div class='title'>{title}</div></div>", unsafe_allow_html=True)
+        # right actions: edit and status select
+        with right:
+            # Edit button
+            if st.button("✏️ Edit", key=f"edit_btn_{aid}"):
+                open_edit(aid)
+            # status select inline (small)
+            sel_status_key = f"status_sel_{aid}"
+            # ensure session_state default for select so UI remains stable
+            st.session_state.setdefault(sel_status_key, status)
+            selected_status = st.selectbox("", STATUS_OPTIONS, index=STATUS_OPTIONS.index(st.session_state.get(sel_status_key, status)) if st.session_state.get(sel_status_key, status) in STATUS_OPTIONS else 0, key=sel_status_key, label_visibility="collapsed")
+            # if user changed, persist
+            if selected_status != status:
+                updated = dict(item)
+                updated["status"] = selected_status
+                upsert_assignments([updated])
+                st.experimental_rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)  # meta-row
+
+        # type row
         if atype:
             st.markdown(f"<div class='atype'>📌 {atype}</div>", unsafe_allow_html=True)
-        # Action buttons row
-        btn_col1, btn_col2, btn_col3 = st.columns([1,1,1])
-        with btn_col1:
-            if st.button("✏️ Edit", key=f"edit_{aid}"):
-                open_edit_modal(aid)
-        with btn_col2:
-            if st.button("✅ Mark Done", key=f"done_{aid}"):
+
+        # actions row (spaced)
+        a1, a2, a3 = st.columns([1,1,1], gap="small")
+        with a1:
+            if st.button("✅ Mark Done", key=f"done_btn_{aid}"):
                 updated = dict(item)
                 updated["status"] = "Done"
                 upsert_assignments([updated])
                 st.experimental_rerun()
-        with btn_col3:
-            if st.button("🗑️ Delete", key=f"delete_{aid}"):
+        with a2:
+            if st.button("🔁 Duplicate", key=f"dup_btn_{aid}"):
+                dup = dict(item)
+                dup["id"] = str(uuid.uuid4())
+                dup["created_at"] = datetime.utcnow().isoformat()
+                upsert_assignments([dup])
+                st.experimental_rerun()
+        with a3:
+            if st.button("🗑️ Delete", key=f"del_btn_{aid}"):
                 delete_assignment(aid)
                 st.experimental_rerun()
-        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
-        # Footer: due & days left on left, priority & status on right
-        footer_html = f"""
-            <div class='card-footer'>
-                <div class='small-muted'>📅 {due_text} &nbsp; • &nbsp; <span style='background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:8px'>{days_text}</span></div>
-                <div style='display:flex; gap:10px; align-items:center;'>
-                    <div class='small-muted' style='margin-right:6px'>PRIORITY:</div>
-                    <div class='priority-badge'>{priority}</div>
-                    <div class='pill {status_cls}' style='margin-left:10px'>{status}</div>
-                </div>
-            </div>
-        """
-        st.markdown(footer_html, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown("<div style='height:40px'></div>", unsafe_allow_html=True)
+        # footer row
+        st.markdown("<div class='footer'>", unsafe_allow_html=True)
+        # left footer
+        left_f, right_f = st.columns([3,2], gap="small")
+        with left_f:
+            st.markdown(f"<div class='small-muted'>📅 {due_text} &nbsp; • &nbsp; <span class='days-badge'>{days_text}</span></div>", unsafe_allow_html=True)
+        with right_f:
+            # Inline priority select
+            prio_key = f"prio_sel_{aid}"
+            st.session_state.setdefault(prio_key, priority)
+            selected_prio = st.selectbox("", PRIORITY_OPTIONS, index=PRIORITY_OPTIONS.index(st.session_state.get(prio_key, priority)) if st.session_state.get(prio_key, priority) in PRIORITY_OPTIONS else 1, key=prio_key, label_visibility="collapsed")
+            if selected_prio != priority:
+                updated = dict(item)
+                updated["priority"] = selected_prio
+                upsert_assignments([updated])
+                st.experimental_rerun()
+            # show status pill visually as well
+            pill_cls = "st-not-started"
+            if status == "In Progress":
+                pill_cls = "st-in-progress"
+            elif status == "Done":
+                pill_cls = "st-done"
+            st.markdown(f"<div style='display:flex; gap:8px; align-items:center; justify-content:flex-end'><div class='small-muted' style='margin-right:6px'>PRIORITY:</div><div class='priority-badge' style='padding:6px 10px; border-radius:8px; background: rgba(255,255,255,0.01); color:#d1fae5; border:1px solid rgba(255,255,255,0.03);'>{selected_prio}</div><div class='status-pill {pill_cls}' style='margin-left:8px'>{status}</div></div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)  # footer
+        st.markdown("</div>", unsafe_allow_html=True)  # card-content
+        st.markdown("</div>", unsafe_allow_html=True)  # card-row
+        st.markdown("</div>", unsafe_allow_html=True)  # card outer
+
+st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("<div style='height:48px'></div>", unsafe_allow_html=True)
