@@ -1,17 +1,30 @@
-def _wrap_result(res):
-    """Normalize supabase client result to a dict-like with optional 'error' and 'data' keys."""
-    if isinstance(res, dict):
-        return res
-    try:
-        err = getattr(res, "error", None)
-        data = getattr(res, "data", None)
-        return {"error": err, "data": data}
-    except Exception:
-        return {"error": None, "data": None}
-# TEMP DEBUG - remove after testing
+"""
+Assignment Tracker — Streamlit app with Supabase auth + Postgres persistence
+(Do NOT hardcode keys here; put them in Streamlit secrets)
+"""
+
+from datetime import datetime, date
+import uuid
+import pandas as pd
+import streamlit as st
+from supabase import create_client, Client
+
+# -----------------------
+# Configuration / secrets
+# -----------------------
+try:
+    SUPABASE_URL = st.secrets["supabase"]["url"]
+    SUPABASE_KEY = st.secrets["supabase"]["key"]
+except Exception:
+    st.error("Supabase credentials are not configured. Add them to Streamlit secrets as [supabase].")
+    st.stop()
+
+sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# --- TEMP DEBUG (safe) - remove after testing ---
 try:
     st.sidebar.write("Streamlit started OK")
-    # show only the secret keys names, not values
+    # prints only the key NAMES (not values)
     st.sidebar.write("supabase secret keys present:", list(st.secrets.get("supabase", {}).keys()))
 except Exception as e:
     st.sidebar.error("Secrets check error: " + str(e))
@@ -22,7 +35,18 @@ try:
     st.sidebar.write("sb.auth methods:", auth_methods)
 except Exception as e:
     st.sidebar.write("Auth client inspection error: " + str(e))
-# END TEMP DEBUG
+# --- END TEMP DEBUG ---
+
+def _wrap_result(res):
+    """Normalize supabase client result to a dict-like with optional 'error' and 'data' keys."""
+    if isinstance(res, dict):
+        return res
+    try:
+        err = getattr(res, "error", None)
+        data = getattr(res, "data", None)
+        return {"error": err, "data": data}
+    except Exception:
+        return {"error": None, "data": None}
 
 def sign_in(email: str, password: str):
     """
