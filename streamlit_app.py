@@ -22,8 +22,8 @@ from supabase import create_client, Client  # pip install supabase
 # -----------------------
 # Put these into Streamlit secrets (see instructions): st.secrets["supabase"]["url"], st.secrets["supabase"]["key"]
 try:
-    SUPABASE_URL = st.secrets["supabase"]["url"]
-    SUPABASE_KEY = st.secrets["supabase"]["key"]
+    SUPABASE_URL = st.secrets["supabase"]["https://fvyluockpbswsocxgoen.supabase.co"]
+    SUPABASE_KEY = st.secrets["supabase"]["sb_publishable_qBZ-Twb9O_hi8sZesyCTQA__XJTqsmS"]
 except Exception:
     st.error("Supabase credentials are not configured. Add them to Streamlit secrets as [supabase].")
     st.stop()
