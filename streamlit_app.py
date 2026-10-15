@@ -2,9 +2,10 @@
 Assignment Tracker — Dark Matrix Overlay UI
 
 Fixes:
-- Resolved StreamlitInvalidLayoutContextError by resetting modal state flags upon opening
-- Made card indicator circle a functional, clickable checkbox that toggles 'Done' / 'Not Started'
-- Preserved 100% of Supabase Auth & JSON persistence backend logic
+- Added real-time Streamlit on_change callbacks for checkboxes, status dropdowns, and priority selectors
+- Clicking the circular checkbox instantly sets assignment status to 'Done' / 'Not Started' and syncs the dropdown
+- State flags for modals automatically reset to prevent StreamlitInvalidLayoutContextError
+- 100% preserved Supabase Auth & persistence backend logic
 """
 
 from __future__ import annotations
@@ -359,6 +360,32 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
+# Real-Time Callback Handlers
+# -----------------------
+def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
+    chk_val = st.session_state.get(f"chk_done_{aid}", False)
+    new_status = "Done" if chk_val else "Not Started"
+    row_dict["status"] = new_status
+    st.session_state[f"status_sel_{aid}"] = new_status
+    upsert_assignments([row_dict])
+
+
+def on_status_change(aid: str, row_dict: Dict[str, Any]):
+    new_status = st.session_state.get(f"status_sel_{aid}")
+    if new_status:
+        row_dict["status"] = new_status
+        st.session_state[f"chk_done_{aid}"] = (new_status == "Done")
+        upsert_assignments([row_dict])
+
+
+def on_priority_change(aid: str, row_dict: Dict[str, Any]):
+    new_prio = st.session_state.get(f"prio_sel_{aid}")
+    if new_prio:
+        row_dict["priority"] = new_prio
+        upsert_assignments([row_dict])
+
+
+# -----------------------
 # Date / Sort Helpers
 # -----------------------
 def parse_date_iso_or_empty(s: Any) -> Optional[date]:
@@ -610,7 +637,6 @@ st.markdown(
 # -----------------------
 @dialog_decorator("Create New Assignment")
 def show_add_assignment_dialog(user_id: str):
-    # Reset flag immediately so closing dialog does not re-trigger it
     st.session_state["_open_add_modal"] = False
 
     courses = _read_courses_file()
@@ -655,14 +681,11 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
     rows = _read_data_file()
     assignment = next((r for r in rows if r.get("id") == aid), None)
 
-    # Safely clear assignment ID if item was deleted or invalid
     if not assignment:
         st.session_state["_edit_assignment_id"] = ""
         st.warning("Assignment no longer exists.")
         return
 
-    # Clear trigger flag so closing dialog doesn't linger
-    current_aid = st.session_state["_edit_assignment_id"]
     st.session_state["_edit_assignment_id"] = ""
 
     courses = _read_courses_file()
@@ -906,18 +929,16 @@ else:
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.5, 1.7, 0.9, 1.8])
                     
                     with c_top1:
-                        # Interactive circular completion checkbox
-                        is_done = (status == "Done")
-                        chk_done = st.checkbox(
+                        # Real-time interactive completion checkbox
+                        chk_key = f"chk_done_{aid}"
+                        st.checkbox(
                             "Done",
-                            value=is_done,
-                            key=f"chk_done_{aid}",
-                            label_visibility="collapsed"
+                            value=(status == "Done"),
+                            key=chk_key,
+                            label_visibility="collapsed",
+                            on_change=on_checkbox_toggle,
+                            args=(aid, row_dict)
                         )
-                        if chk_done != is_done:
-                            row_dict["status"] = "Done" if chk_done else "Not Started"
-                            upsert_assignments([row_dict])
-                            safe_rerun()
 
                     with c_top2:
                         st.markdown(f"<span class='course-badge'>{course}</span>", unsafe_allow_html=True)
@@ -928,17 +949,16 @@ else:
                             safe_rerun()
                     
                     with c_top4:
-                        new_status = st.selectbox(
+                        sel_key = f"status_sel_{aid}"
+                        st.selectbox(
                             "Status",
                             STATUS_OPTIONS,
                             index=STATUS_OPTIONS.index(status) if status in STATUS_OPTIONS else 0,
-                            key=f"status_sel_{aid}",
+                            key=sel_key,
                             label_visibility="collapsed",
+                            on_change=on_status_change,
+                            args=(aid, row_dict)
                         )
-                        if new_status != status:
-                            row_dict["status"] = new_status
-                            upsert_assignments([row_dict])
-                            safe_rerun()
 
                     # Card Title
                     st.markdown(f"<div class='card-title'>{title}</div>", unsafe_allow_html=True)
@@ -961,14 +981,13 @@ else:
                         with prio_col1:
                             st.markdown("<div class='prio-label'>PRIORITY:</div>", unsafe_allow_html=True)
                         with prio_col2:
-                            new_prio = st.selectbox(
+                            prio_key = f"prio_sel_{aid}"
+                            st.selectbox(
                                 "Priority",
                                 PRIORITY_OPTIONS,
                                 index=PRIORITY_OPTIONS.index(priority) if priority in PRIORITY_OPTIONS else 0,
-                                key=f"prio_sel_{aid}",
+                                key=prio_key,
                                 label_visibility="collapsed",
+                                on_change=on_priority_change,
+                                args=(aid, row_dict)
                             )
-                            if new_prio != priority:
-                                row_dict["priority"] = new_prio
-                                upsert_assignments([row_dict])
-                                safe_rerun()
