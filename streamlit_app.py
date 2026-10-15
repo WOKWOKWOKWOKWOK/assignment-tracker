@@ -1,10 +1,13 @@
 """
 Assignment Tracker — Streamlit app with Supabase auth + JSON persistence fallback
 
-This version removes the debugging output shown in the sidebar so normal users
-won't see internal debug info. It keeps the robust sign_in / sign_up wrappers
-(to tolerate different supabase-py versions) but does not render debug data.
+This version:
+- removes debug output from the app UI
+- keeps robust sign-in / sign-up support for different supabase-py versions
+- handles multiple Supabase response shapes without failing on "could not extract user"
+- uses JSON storage as a simple fallback for assignment data
 """
+
 from __future__ import annotations
 
 import json
@@ -43,22 +46,13 @@ st.title("Assignment Tracker (Multi-user)")
 # -----------------------
 # Helpers
 # -----------------------
-def _wrap_result(res: Any) -> Dict[str, Any]:
-    """Normalize different response shapes into a dict with error/data keys."""
-    if isinstance(res, dict):
-        return res
-    try:
-        return {"error": getattr(res, "error", None), "data": getattr(res, "data", None)}
-    except Exception:
-        return {"error": None, "data": None}
-
-
 def _to_dict(obj: Any) -> Optional[Dict[str, Any]]:
-    """Try to convert common object shapes into a dict for inspection."""
+    """Convert common object-like values into a dict when possible."""
     if obj is None:
         return None
     if isinstance(obj, dict):
         return obj
+
     for method_name in ("dict", "model_dump"):
         method = getattr(obj, method_name, None)
         if callable(method):
@@ -68,24 +62,72 @@ def _to_dict(obj: Any) -> Optional[Dict[str, Any]]:
                     return value
             except Exception:
                 pass
+
     if hasattr(obj, "__dict__"):
         try:
             return dict(obj.__dict__)
         except Exception:
             pass
+
     return None
+
+
+def _wrap_result(res: Any) -> Dict[str, Any]:
+    """
+    Normalize different Supabase response shapes into a dict with:
+    - error
+    - data
+    - raw
+
+    Important: preserve nested user/session data when Supabase returns it in
+    a different structure so we can still extract the signed-in user.
+    """
+    if isinstance(res, dict):
+        mapped = _to_dict(res) or res
+        return {
+            "error": res.get("error") if isinstance(res, dict) else None,
+            "data": res.get("data") if isinstance(res, dict) and "data" in res else mapped,
+            "raw": mapped,
+        }
+
+    try:
+        err = getattr(res, "error", None)
+        data = getattr(res, "data", None)
+
+        if data is None:
+            mapped = _to_dict(res)
+            if isinstance(mapped, dict):
+                data = mapped
+            else:
+                data = None
+
+        raw = _to_dict(res) or None
+        return {"error": err, "data": data, "raw": raw}
+    except Exception:
+        try:
+            raw = _to_dict(res) or None
+            return {"error": None, "data": raw, "raw": raw}
+        except Exception:
+            return {"error": None, "data": None, "raw": None}
 
 
 def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
     """
     Try many shapes of Supabase auth responses and return a user dict or None.
-    Handles dict-responses and object-responses from different supabase library versions.
+
+    Handles:
+    - {"data": {"user": {...}}}
+    - {"user": {...}}
+    - {"session": {"user": {...}}}
+    - object with .data / .user / .session
     """
     if response is None:
         return None
 
     def first_user_from_mapping(obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        # Common Supabase response paths where a user might appear
+        if not isinstance(obj, dict):
+            return None
+
         for path in [
             ("data", "user"),
             ("data", "session", "user"),
@@ -104,20 +146,34 @@ def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
                     break
             if ok and isinstance(cur, dict):
                 return cur
+
         return None
 
-    # If response is a dict, try directly
+    # dict response
     if isinstance(response, dict):
         user = first_user_from_mapping(response)
         if user:
             return user
 
-    # If response is object-like, inspect attributes and try to map to dict
-    for attr_name in ("user", "session", "data"):
+        raw = response.get("raw") if isinstance(response, dict) else None
+        if isinstance(raw, dict):
+            user = first_user_from_mapping(raw)
+            if user:
+                return user
+
+        data = response.get("data") if isinstance(response, dict) else None
+        if isinstance(data, dict):
+            user = first_user_from_mapping(data)
+            if user:
+                return user
+
+    # object response
+    for attr_name in ["user", "session", "data", "raw"]:
         try:
             obj = getattr(response, attr_name, None)
         except Exception:
             obj = None
+
         if obj is not None:
             if isinstance(obj, dict):
                 user = first_user_from_mapping(obj)
@@ -130,7 +186,7 @@ def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
                     if user:
                         return user
 
-    # As a last resort try mapping the top-level response object
+    # full object -> dict
     mapped = _to_dict(response)
     if isinstance(mapped, dict):
         user = first_user_from_mapping(mapped)
@@ -140,9 +196,6 @@ def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-# -----------------------
-# Auth helpers (robust, no debug output)
-# -----------------------
 def _available_auth_methods() -> List[str]:
     try:
         auth = getattr(sb, "auth", None)
@@ -153,18 +206,15 @@ def _available_auth_methods() -> List[str]:
         return []
 
 
+# -----------------------
+# Auth helpers
+# -----------------------
 def sign_up(email: str, password: str) -> Dict[str, Any]:
-    """
-    Robust sign up wrapper:
-    - Tries multiple method names and both dict-style and kwargs-style calls.
-    - Returns a dict with 'error' and 'data' keys.
-    """
     auth = getattr(sb, "auth", None)
     if auth is None:
-        return {"error": "sb.auth is not available", "data": None}
+        return {"error": "sb.auth is not available", "data": None, "raw": None}
 
     try:
-        # prefer sign_up then sign_up_with_password variants
         if hasattr(auth, "sign_up"):
             try:
                 res = auth.sign_up({"email": email, "password": password})
@@ -176,22 +226,17 @@ def sign_up(email: str, password: str) -> Dict[str, Any]:
             except TypeError:
                 res = auth.sign_up_with_password(email=email, password=password)
         else:
-            return {"error": "No supported sign-up method found", "data": None}
+            return {"error": "No supported sign-up method found", "data": None, "raw": None}
 
         return _wrap_result(res)
     except Exception as e:
-        return {"error": str(e), "data": None}
+        return {"error": str(e), "data": None, "raw": None}
 
 
 def sign_in(email: str, password: str) -> Dict[str, Any]:
-    """
-    Robust sign in wrapper:
-    - Tries sign_in_with_password, sign_in, and tolerates call signature differences.
-    - Returns a dict with 'error' and 'data' keys.
-    """
     auth = getattr(sb, "auth", None)
     if auth is None:
-        return {"error": "sb.auth is not available", "data": None}
+        return {"error": "sb.auth is not available", "data": None, "raw": None}
 
     try:
         if hasattr(auth, "sign_in_with_password"):
@@ -205,15 +250,14 @@ def sign_in(email: str, password: str) -> Dict[str, Any]:
             except TypeError:
                 res = auth.sign_in(email=email, password=password)
         else:
-            return {"error": "No supported sign-in method found", "data": None}
+            return {"error": "No supported sign-in method found", "data": None, "raw": None}
 
         return _wrap_result(res)
     except Exception as e:
-        return {"error": str(e), "data": None}
+        return {"error": str(e), "data": None, "raw": None}
 
 
 def sign_out() -> None:
-    """Sign out locally and attempt to sign out via supabase client."""
     try:
         auth = getattr(sb, "auth", None)
         if auth is not None and hasattr(auth, "sign_out"):
@@ -259,7 +303,6 @@ def current_user() -> Optional[Dict[str, Any]]:
     except Exception:
         pass
 
-    # If the app stored a user in session_state, prefer that
     if "user" in st.session_state:
         return st.session_state.user
 
@@ -267,7 +310,7 @@ def current_user() -> Optional[Dict[str, Any]]:
 
 
 # -----------------------
-# Simple JSON persistence (fallback)
+# Simple JSON persistence fallback
 # -----------------------
 def _read_data_file() -> List[Dict[str, Any]]:
     if not DATA_FILE.exists():
@@ -294,10 +337,11 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
         df = pd.DataFrame(columns=["id", "user_id", "title", "course", "due_date", "status", "notes", "created_at"])
     else:
         df = pd.DataFrame(user_rows)
-    # ensure columns exist
+
     for c in ["id", "user_id", "title", "course", "due_date", "status", "notes", "created_at"]:
         if c not in df.columns:
             df[c] = ""
+
     return df
 
 
@@ -324,7 +368,6 @@ def delete_assignment(assignment_id: str) -> None:
 # -----------------------
 user = current_user()
 if user:
-    # show signed-in email if available
     email = user.get("email") or (user.get("user_metadata") or {}).get("email")
     st.sidebar.write(f"Signed in as: {email or user.get('id') or 'unknown'}")
     if st.sidebar.button("Sign out"):
@@ -340,6 +383,7 @@ else:
         if submitted:
             email = email.strip()
             password = password.strip()
+
             if auth_mode == "Sign up":
                 r = sign_up(email, password)
                 err = r.get("error")
@@ -356,6 +400,12 @@ else:
                 if not user_obj and isinstance(data, dict):
                     user_obj = data.get("user") or (data.get("session") or {}).get("user")
 
+                # Try the raw fallback too:
+                if not user_obj and isinstance(r, dict):
+                    raw = r.get("raw")
+                    if isinstance(raw, dict):
+                        user_obj = extract_user_from_auth_response(raw)
+
                 if err:
                     st.sidebar.error(f"Sign in failed: {err}")
                 elif not user_obj:
@@ -369,6 +419,7 @@ else:
                             st.experimental_rerun()
                         except Exception:
                             pass
+
 
 # -----------------------
 # App main UI (requires authentication)
@@ -423,37 +474,37 @@ if "status" in df.columns:
 else:
     total = in_progress = completed = 0
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Total assignments", total)
-col2.metric("In progress", in_progress)
-col3.metric("Completed", completed)
+c1, c2, c3 = st.columns(3)
+c1.metric("Total assignments", total)
+c2.metric("In progress", in_progress)
+c3.metric("Completed", completed)
 
 st.subheader("Your assignments")
 
 if df.empty:
     st.info("No assignments yet. Add one from the sidebar.")
 else:
-    # show a table with basic actions
     df_display = df[["id", "title", "course", "due_date", "status", "notes", "created_at"]].copy()
     df_display = df_display.sort_values("created_at", ascending=False)
     st.dataframe(df_display.reset_index(drop=True), use_container_width=True)
 
-    # Provide delete/edit controls per row
     for _, row in df_display.iterrows():
         with st.expander(f"{row['title']} — {row['course']}"):
             st.write("Due:", row["due_date"])
             st.write("Status:", row["status"])
             st.write("Notes:", row["notes"])
             col_a, col_b = st.columns([1, 1])
+
             if col_a.button("Delete", key=f"del_{row['id']}"):
                 delete_assignment(row["id"])
                 st.session_state.df_cached = fetch_assignments(user_id)
                 st.success("Deleted assignment")
-                st.experimental_rerun()
+                st.rerun()
+
             if col_b.button("Mark Completed", key=f"complete_{row['id']}"):
                 updated = dict(row)
                 updated["status"] = "Completed"
                 upsert_assignments([updated])
                 st.session_state.df_cached = fetch_assignments(user_id)
                 st.success("Marked completed")
-                st.experimental_rerun()
+                st.rerun()
