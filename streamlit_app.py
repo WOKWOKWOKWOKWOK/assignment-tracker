@@ -1,11 +1,12 @@
 import streamlit as st
-import pandas as pd
+import streamlit.components.v1 as components
 import requests
+import pandas as pd
 from datetime import datetime, date
 
-# ---------------------------------------------------------
-# CONFIGURATION & CONSTANTS
-# ---------------------------------------------------------
+# -----------------------------------------------------------------------------
+# 1. PAGE CONFIGURATION & CUSTOM STYLING
+# -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Assignment Tracker",
     page_icon="📚",
@@ -13,205 +14,218 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Your Google Apps Script Web App Executable URL
+# Google Apps Script Executable URL
 GAS_URL = "https://script.google.com/a/macros/simsburyschools.net/s/AKfycbzF4gggoAuw3EN6IJU6z-K9ay6cWCdicMXVfMD2VeI-6ShPaT5laDJGmCZkTCeMombx/exec"
 
-# ---------------------------------------------------------
-# API HELPER FUNCTIONS (GOOGLE APPS SCRIPT INTEGRATION)
-# ---------------------------------------------------------
-def fetch_assignments():
-    """Fetch assignments from Google Apps Script Web App (doGet)."""
-    try:
-        response = requests.get(GAS_URL, timeout=10, allow_redirects=True)
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, list):
-                return pd.DataFrame(data)
-            elif isinstance(data, dict) and "data" in data:
-                return pd.DataFrame(data["data"])
-        st.warning(f"Unable to load data (Status code: {response.status_code}). Using local session buffer.")
-    except Exception as e:
-        st.info("Operating in local offline mode (or Google Apps Script URL requires auth).")
-    
-    # Fallback default empty dataframe with expected schema
-    if "local_assignments" not in st.session_state:
-        st.session_state.local_assignments = pd.DataFrame(columns=[
-            "ID", "Title", "Subject", "Due Date", "Priority", "Status", "Notes"
-        ])
-    return st.session_state.local_assignments
-
-def save_assignment_to_gas(assignment_data, action="create"):
-    """Send payload to Google Apps Script Web App (doPost)."""
-    payload = {
-        "action": action,
-        "data": assignment_data
+# Touch-up CSS Styling
+st.markdown("""
+<style>
+    .main .block-container {
+        padding-top: 1.8rem;
+        padding-bottom: 3rem;
     }
+    .task-card {
+        background-color: #ffffff;
+        border-left: 6px solid #3B82F6;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 12px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.06);
+    }
+    .task-card.completed {
+        border-left-color: #10B981;
+        background-color: #F0FDF4;
+    }
+    .task-card.high {
+        border-left-color: #EF4444;
+    }
+    .badge-priority {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: white;
+    }
+    .badge-high { background-color: #EF4444; }
+    .badge-medium { background-color: #F59E0B; }
+    .badge-low { background-color: #3B82F6; }
+</style>
+""", unsafe_allow_html=True)
+
+# -----------------------------------------------------------------------------
+# 2. HELPER FUNCTIONS & DATA SYNC
+# -----------------------------------------------------------------------------
+@st.cache_data(ttl=30)
+def fetch_assignments(url):
+    """Fetch assignment data with redirect and session error handling."""
     try:
-        response = requests.post(GAS_URL, json=payload, timeout=10, allow_redirects=True)
-        return response.status_code == 200
-    except Exception as e:
-        st.error(f"Error communicating with Google Script: {e}")
+        session = requests.Session()
+        res = session.get(url, timeout=10, allow_redirects=True)
+        if res.status_code == 200:
+            payload = res.json()
+            if isinstance(payload, list):
+                return pd.DataFrame(payload)
+            elif isinstance(payload, dict) and "data" in payload:
+                return pd.DataFrame(payload["data"])
+    except Exception:
+        pass
+
+    # Default fallback dataset stored in session state if backend requires Google Login
+    if "assignments_db" not in st.session_state:
+        st.session_state.assignments_db = pd.DataFrame([
+            {
+                "ID": "TASK-101",
+                "Title": "AP US History Essay Outline",
+                "Subject": "History",
+                "Due Date": str(date.today()),
+                "Priority": "High",
+                "Status": "In Progress",
+                "Notes": "Chapter 14 thesis draft and arguments."
+            },
+            {
+                "ID": "TASK-102",
+                "Title": "Math Worksheet #5",
+                "Subject": "Math",
+                "Due Date": str(date.today()),
+                "Priority": "Medium",
+                "Status": "Pending",
+                "Notes": "Complete odd numbers 1-29."
+            }
+        ])
+    return st.session_state.assignments_db
+
+def send_task_to_gas(url, task_payload):
+    """POST payload to Google Apps Script Web App."""
+    try:
+        session = requests.Session()
+        res = session.post(url, json=task_payload, timeout=10, allow_redirects=True)
+        return res.status_code == 200
+    except Exception:
         return False
 
-# ---------------------------------------------------------
-# MAIN APP INTERFACE
-# ---------------------------------------------------------
+# -----------------------------------------------------------------------------
+# 3. INTERFACE LAYOUT & NAVIGATION TABS
+# -----------------------------------------------------------------------------
 st.title("📚 School Assignment Tracker")
-st.markdown("Stay organized, track deadlines, and sync your coursework in real-time.")
 
-# Fetch Data
-df = fetch_assignments()
+tab1, tab2, tab3 = st.tabs(["🖥️ Apps Script Web App", "📊 Dashboard & Filter View", "➕ Add Assignment"])
 
-# Ensure required columns exist
-expected_cols = ["ID", "Title", "Subject", "Due Date", "Priority", "Status", "Notes"]
-for col in expected_cols:
-    if col not in df.columns:
-        df[col] = None
-
-# Format Due Date column
-if not df.empty and "Due Date" in df.columns:
-    df["Due Date Raw"] = pd.to_datetime(df["Due Date"], errors="coerce")
-else:
-    df["Due Date Raw"] = pd.NaT
-
-# ---------------------------------------------------------
-# DASHBOARD METRICS
-# ---------------------------------------------------------
-st.subheader("📊 Summary Dashboard")
-col1, col2, col3, col4 = st.columns(4)
-
-total_tasks = len(df)
-completed_tasks = len(df[df["Status"] == "Completed"]) if not df.empty else 0
-pending_tasks = len(df[df["Status"].isin(["Pending", "In Progress"])]) if not df.empty else 0
-
-today = pd.to_datetime(date.today())
-overdue_tasks = len(df[(df["Due Date Raw"] < today) & (df["Status"] != "Completed")]) if not df.empty else 0
-
-col1.metric("Total Assignments", total_tasks)
-col2.metric("Pending Tasks", pending_tasks)
-col3.metric("Completed Tasks", completed_tasks)
-col4.metric("Overdue Tasks", overdue_tasks, delta_color="inverse")
-
-st.markdown("---")
-
-# ---------------------------------------------------------
-# SIDEBAR: FILTERS & ADD NEW ASSIGNMENT
-# ---------------------------------------------------------
-st.sidebar.header("➕ Add New Assignment")
-with st.sidebar.form("add_assignment_form", clear_on_submit=True):
-    title = st.text_input("Assignment Name*", placeholder="e.g. History Essay")
-    subject = st.text_input("Subject / Class*", placeholder="e.g. AP US History")
-    due_date = st.date_input("Due Date", value=date.today())
-    priority = st.selectbox("Priority Level", ["High", "Medium", "Low"], index=1)
-    status = st.selectbox("Current Status", ["Pending", "In Progress", "Completed"])
-    notes = st.text_area("Notes / Description", placeholder="Additional details or guidelines...")
+# TAB 1: EMBEDDED WEB APP VIEW
+with tab1:
+    st.markdown("### Google Apps Script Live Portal")
+    st.caption("Note: Ensure you are logged into your `@simsburyschools.net` Google Workspace account in this browser.")
     
-    submit_btn = st.form_submit_button("Submit Assignment")
+    # Render embedded iframe using Streamlit Components
+    components.iframe(
+        src=GAS_URL,
+        height=720,
+        scrolling=True
+    )
 
-    if submit_btn:
-        if not title or not subject:
-            st.error("Please enter both Assignment Name and Subject.")
-        else:
-            new_id = f"TASK-{int(datetime.now().timestamp())}"
-            new_record = {
-                "ID": new_id,
-                "Title": title,
-                "Subject": subject,
-                "Due Date": due_date.strftime("%Y-%m-%d"),
-                "Priority": priority,
-                "Status": status,
-                "Notes": notes
-            }
+# TAB 2: PYTHON DASHBOARD & FILTERABLE LIST
+with tab2:
+    df = fetch_assignments(GAS_URL)
+    
+    # Ensure expected columns exist
+    cols = ["ID", "Title", "Subject", "Due Date", "Priority", "Status", "Notes"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+
+    # Top Search & Filters
+    col_s1, col_s2, col_s3 = st.columns([2, 1, 1])
+    with col_s1:
+        search_query = st.text_input("🔍 Search assignments...", "")
+    with col_s2:
+        subjects = ["All"] + list(df["Subject"].unique())
+        selected_subject = st.selectbox("Filter Subject", subjects)
+    with col_s3:
+        status_options = st.multiselect("Status", ["Pending", "In Progress", "Completed"], default=["Pending", "In Progress", "Completed"])
+
+    # Filter Logic
+    filtered_df = df.copy()
+    if search_query:
+        filtered_df = filtered_df[filtered_df["Title"].astype(str).str.contains(search_query, case=False, na=False)]
+    if selected_subject != "All":
+        filtered_df = filtered_df[filtered_df["Subject"] == selected_subject]
+    if status_options:
+        filtered_df = filtered_df[filtered_df["Status"].isin(status_options)]
+
+    # Metrics Summary
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Tasks", len(df))
+    m2.metric("Pending", len(df[df["Status"] == "Pending"]))
+    m3.metric("In Progress", len(df[df["Status"] == "In Progress"]))
+    m4.metric("Completed", len(df[df["Status"] == "Completed"]))
+
+    st.divider()
+
+    # Display Task Cards
+    if filtered_df.empty:
+        st.info("No assignments match your filter criteria.")
+    else:
+        for idx, row in filtered_df.iterrows():
+            priority_val = str(row.get("Priority", "Medium")).lower()
+            status_val = str(row.get("Status", "Pending"))
+            card_class = "completed" if status_val == "Completed" else priority_val
             
-            # Save via API
-            success = save_assignment_to_gas(new_record, action="create")
-            
-            # Local state update
-            new_df = pd.DataFrame([new_record])
-            if "local_assignments" in st.session_state:
-                st.session_state.local_assignments = pd.concat(
-                    [st.session_state.local_assignments, new_df], ignore_index=True
-                )
-            
-            st.success(f"Assignment '{title}' added successfully!")
-            st.rerun()
+            st.markdown(
+                f"""
+                <div class="task-card {card_class}">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h4 style="margin:0; font-size: 1.1rem; color: #1E293B;">{row.get('Title', 'Untitled')}</h4>
+                        <span class="badge-priority badge-{priority_val}">{row.get('Priority', 'Medium')}</span>
+                    </div>
+                    <p style="margin: 6px 0; color: #64748B; font-size: 0.9rem;">
+                        <b>Subject:</b> {row.get('Subject', 'N/A')} &nbsp;|&nbsp; 
+                        <b>Due Date:</b> {row.get('Due Date', 'N/A')} &nbsp;|&nbsp; 
+                        <b>Status:</b> {status_val}
+                    </p>
+                    <p style="margin:0; color: #334155; font-size: 0.88rem;">{row.get('Notes', '')}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-# ---------------------------------------------------------
-# FILTER CONTROLS
-# ---------------------------------------------------------
-st.sidebar.markdown("---")
-st.sidebar.header("🔍 Filter Assignments")
-
-subjects_list = ["All"] + list(df["Subject"].dropna().unique()) if not df.empty else ["All"]
-selected_subject = st.sidebar.selectbox("Filter by Subject", subjects_list)
-
-status_filter = st.sidebar.multiselect(
-    "Filter by Status", 
-    options=["Pending", "In Progress", "Completed"], 
-    default=["Pending", "In Progress", "Completed"]
-)
-
-# Apply Filters
-filtered_df = df.copy()
-
-if selected_subject != "All":
-    filtered_df = filtered_df[filtered_df["Subject"] == selected_subject]
-
-if status_filter:
-    filtered_df = filtered_df[filtered_df["Status"].isin(status_filter)]
-
-# ---------------------------------------------------------
-# MAIN CONTENT: ASSIGNMENT LIST & ACTIONS
-# ---------------------------------------------------------
-st.subheader("📋 Assignment List")
-
-if filtered_df.empty:
-    st.info("No assignments found matching your filter criteria.")
-else:
-    # Sort by Due Date
-    filtered_df = filtered_df.sort_values(by="Due Date Raw", ascending=True)
-
-    for idx, row in filtered_df.iterrows():
-        status_color = "🟢" if row["Status"] == "Completed" else ("🟡" if row["Status"] == "In Progress" else "🔴")
+# TAB 3: ADD NEW ASSIGNMENT FORM
+with tab3:
+    st.subheader("Add New Assignment")
+    with st.form("add_task_form", clear_on_submit=True):
+        title = st.text_input("Assignment Title*")
+        subject = st.selectbox("Subject*", ["Math", "English", "History", "Science", "Foreign Language", "Elective", "Other"])
+        due_date = st.date_input("Due Date", value=date.today())
+        priority = st.select_slider("Priority Level", options=["Low", "Medium", "High"], value="Medium")
+        status = st.selectbox("Status", ["Pending", "In Progress", "Completed"])
+        notes = st.text_area("Notes / Instructions")
         
-        with st.expander(f"{status_color} **{row['Title']}** ({row['Subject']}) — Due: {row['Due Date']}"):
-            c1, c2, c3 = st.columns([2, 2, 1])
-            
-            with c1:
-                st.write(f"**Priority:** {row['Priority']}")
-                st.write(f"**Status:** {row['Status']}")
-            with c2:
-                st.write(f"**Due Date:** {row['Due Date']}")
-                st.write(f"**Notes:** {row['Notes'] if row['Notes'] else 'N/A'}")
-            
-            with c3:
-                # Toggle Status Button
-                new_status = "Completed" if row["Status"] != "Completed" else "Pending"
-                btn_label = "Mark Complete" if row["Status"] != "Completed" else "Mark Pending"
+        submitted = st.form_submit_button("Submit Assignment")
+        if submitted:
+            if not title:
+                st.error("Please enter a title for the assignment.")
+            else:
+                new_payload = {
+                    "action": "create",
+                    "data": {
+                        "ID": f"TASK-{int(datetime.now().timestamp())}",
+                        "Title": title,
+                        "Subject": subject,
+                        "Due Date": str(due_date),
+                        "Priority": priority,
+                        "Status": status,
+                        "Notes": notes
+                    }
+                }
                 
-                if st.button(btn_label, key=f"status_{row['ID']}_{idx}"):
-                    update_data = {"ID": row["ID"], "Status": new_status}
-                    save_assignment_to_gas(update_data, action="update")
-                    
-                    # Local update
-                    if "local_assignments" in st.session_state:
-                        st.session_state.local_assignments.loc[
-                            st.session_state.local_assignments["ID"] == row["ID"], "Status"
-                        ] = new_status
-                    st.rerun()
+                # Send to Google Apps Script
+                send_task_to_gas(GAS_URL, new_payload)
                 
-                # Delete Button
-                if st.button("Delete Task", key=f"del_{row['ID']}_{idx}", type="secondary"):
-                    save_assignment_to_gas({"ID": row["ID"]}, action="delete")
-                    
-                    # Local update
-                    if "local_assignments" in st.session_state:
-                        st.session_state.local_assignments = st.session_state.local_assignments[
-                            st.session_state.local_assignments["ID"] != row["ID"]
-                        ]
-                    st.success("Deleted!")
-                    st.rerun()
-
-# Data Table View
-with st.expander("📄 View Full Raw Data Table"):
-    st.dataframe(df[expected_cols], use_container_width=True)
+                # Local state update
+                if "assignments_db" in st.session_state:
+                    st.session_state.assignments_db = pd.concat([
+                        st.session_state.assignments_db,
+                        pd.DataFrame([new_payload["data"]])
+                    ], ignore_index=True)
+                
+                st.success(f"Assignment '{title}' saved successfully!")
+                st.rerun()
