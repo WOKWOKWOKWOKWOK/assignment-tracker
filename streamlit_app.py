@@ -1,11 +1,12 @@
 """
 Assignment Tracker — Dark Matrix Overlay UI
 
-Fixes:
-- Added real-time Streamlit on_change callbacks for checkboxes, status dropdowns, and priority selectors
-- Clicking the circular checkbox instantly sets assignment status to 'Done' / 'Not Started' and syncs the dropdown
-- State flags for modals automatically reset to prevent StreamlitInvalidLayoutContextError
-- 100% preserved Supabase Auth & persistence backend logic
+Updates:
+- Added '📚 Change Courses' button in the top header toolbar
+- Automated first-registration class setup modal for new accounts
+- Fixed squished words and truncated buttons with optimized card column ratios
+- Restored color-coded Status & Priority selectbox badges (Matching Mockup UI)
+- 100% Preserved Supabase Auth & JSON persistence logic
 """
 
 from __future__ import annotations
@@ -310,13 +311,13 @@ def _write_data_file(rows: List[Dict[str, Any]]) -> None:
 
 def _read_courses_file() -> List[str]:
     if not COURSES_FILE.exists():
-        return ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+        return []
     try:
         with COURSES_FILE.open("r", encoding="utf-8") as f:
             data = json.load(f)
-            return data if data else ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+            return data if isinstance(data, list) else []
     except Exception:
-        return ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+        return []
 
 
 def _write_courses_file(courses: List[str]) -> None:
@@ -442,7 +443,7 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS Styling (Matches Image Overlay)
+# CSS Styling (Matches Mockup UI + Fixes Word Squishing)
 # -----------------------
 st.markdown(
     """
@@ -466,7 +467,7 @@ st.markdown(
         border-right: 1px solid #1e293b;
     }
 
-    /* App Header Title */
+    /* Header Styling */
     .app-title {
         font-size: 2.1rem;
         font-weight: 900;
@@ -484,7 +485,7 @@ st.markdown(
         margin-top: 4px;
     }
 
-    /* Engine Status Pill */
+    /* Status Pill Engine */
     .status-engine-pill {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -506,7 +507,7 @@ st.markdown(
         display: inline-block;
     }
 
-    /* Top Buttons Styling */
+    /* Top Action Buttons */
     button[key="toolbar_clear"] {
         background-color: #064e3b !important;
         color: #34d399 !important;
@@ -523,7 +524,15 @@ st.markdown(
         font-weight: 600 !important;
     }
 
-    /* Calendar Banner */
+    button[key="toolbar_courses"] {
+        background-color: #1e293b !important;
+        color: #818cf8 !important;
+        border: 1px solid #312e81 !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+
+    /* Calendar Banner Box */
     .calendar-banner-box {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -536,7 +545,7 @@ st.markdown(
         margin: 16px 0 20px 0;
     }
 
-    /* Card Containers */
+    /* Card Box Container */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
@@ -546,9 +555,21 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
-    /* Circular Checkbox Styling */
+    /* Edit Button Styling (Prevents Truncation into '...') */
+    button[key^="edit_btn_"] {
+        padding: 3px 10px !important;
+        font-size: 0.8rem !important;
+        min-height: 32px !important;
+        background-color: #1e293b !important;
+        border: 1px solid #334155 !important;
+        color: #cbd5e1 !important;
+        border-radius: 6px !important;
+        width: 100% !important;
+    }
+
+    /* Circular Completion Checkbox */
     div[data-testid="stCheckbox"] {
-        margin-top: 2px;
+        margin-top: 4px;
     }
 
     div[data-testid="stCheckbox"] input[type="checkbox"] {
@@ -559,14 +580,15 @@ st.markdown(
         cursor: pointer;
     }
 
+    /* Subject Badge Pill */
     .course-badge {
         background-color: #1e1b4b;
         color: #818cf8;
         border: 1px solid #312e81;
         border-radius: 6px;
-        padding: 2px 8px;
+        padding: 3px 10px;
         font-weight: 700;
-        font-size: 0.72rem;
+        font-size: 0.75rem;
         letter-spacing: 0.04em;
         display: inline-block;
     }
@@ -575,7 +597,7 @@ st.markdown(
         font-size: 1.35rem;
         font-weight: 800;
         color: #ffffff;
-        margin-top: 8px;
+        margin-top: 10px;
         margin-bottom: 2px;
         letter-spacing: -0.02em;
     }
@@ -603,6 +625,7 @@ st.markdown(
         display: flex;
         align-items: center;
         gap: 6px;
+        margin-top: 4px;
     }
 
     .days-badge {
@@ -620,12 +643,53 @@ st.markdown(
         font-weight: 700;
         letter-spacing: 0.05em;
         text-align: right;
-        margin-top: 6px;
+        margin-top: 8px;
     }
 
+    /* Status Selectbox Color Badge Styles */
     div[data-baseweb="select"] {
-        background-color: #0b0f19 !important;
         border-radius: 8px !important;
+        font-size: 0.82rem !important;
+    }
+
+    /* Red Badge for 'Not Started' */
+    .status-not-started div[data-baseweb="select"] {
+        background-color: #2a0812 !important;
+        border: 1px solid #9f1239 !important;
+        color: #fca5a5 !important;
+    }
+
+    /* Amber Badge for 'In Progress' */
+    .status-in-progress div[data-baseweb="select"] {
+        background-color: #2e1b04 !important;
+        border: 1px solid #854d0e !important;
+        color: #fde047 !important;
+    }
+
+    /* Green Badge for 'Done' */
+    .status-done div[data-baseweb="select"] {
+        background-color: #032b1d !important;
+        border: 1px solid #065f46 !important;
+        color: #34d399 !important;
+    }
+
+    /* Priority Color Accents */
+    .prio-low div[data-baseweb="select"] {
+        border: 1px solid #059669 !important;
+        color: #34d399 !important;
+        background-color: #022c22 !important;
+    }
+
+    .prio-medium div[data-baseweb="select"] {
+        border: 1px solid #d97706 !important;
+        color: #fde047 !important;
+        background-color: #2e1b04 !important;
+    }
+
+    .prio-high div[data-baseweb="select"] {
+        border: 1px solid #dc2626 !important;
+        color: #fca5a5 !important;
+        background-color: #2a0812 !important;
     }
     </style>
     """,
@@ -633,17 +697,40 @@ st.markdown(
 )
 
 # -----------------------
-# Dialog Modals (State-safe)
+# Dialog Modals
 # -----------------------
+@dialog_decorator("Welcome! Setup Your Classes")
+def show_welcome_courses_dialog():
+    st.session_state["_show_welcome_courses_modal"] = False
+
+    st.markdown("### 🎓 Welcome to Assignment Tracker!")
+    st.write("Please list the subjects or classes you are taking this term (comma separated or line by line):")
+    
+    courses_input = st.text_area(
+        "Enter your classes:",
+        value="MATH, SCIENCE, ENGLISH, HISTORY",
+        help="Example: MATH, SCIENCE, SPANISH, AP PHYSICS"
+    )
+    
+    if st.button("Save Schedule & Start", key="save_initial_courses_btn"):
+        parsed_courses = [c.strip().upper() for c in courses_input.replace("\n", ",").split(",") if c.strip()]
+        if parsed_courses:
+            _write_courses_file(parsed_courses)
+            st.success("Classes saved successfully!")
+            safe_rerun()
+        else:
+            st.warning("Please enter at least one class.")
+
+
 @dialog_decorator("Create New Assignment")
 def show_add_assignment_dialog(user_id: str):
     st.session_state["_open_add_modal"] = False
 
-    courses = _read_courses_file()
+    courses = _read_courses_file() or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
     with st.form("add_assignment_form"):
         title = st.text_input("Assignment Name", key="add_title")
         course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key="add_course_choice")
-        course_free = st.text_input("Or type a course name", value="", key="add_course_free")
+        course_free = st.text_input("Or type a new course name", value="", key="add_course_free")
         status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
         due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
         priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_priority")
@@ -653,11 +740,11 @@ def show_add_assignment_dialog(user_id: str):
         submitted_add = st.form_submit_button("Add Assignment")
 
         if submitted_add:
-            course_val = (course_free.strip() or course_choice or "MATH").upper()
+            course_val = (course_free.strip() or course_choice or "GENERAL").upper()
             new_row = {
                 "id": str(uuid.uuid4()),
                 "user_id": user_id,
-                "title": title.strip() or "12345",
+                "title": title.strip() or "Untitled Assignment",
                 "course": course_val.strip(),
                 "due_date": due.isoformat() if isinstance(due, date) else "",
                 "status": status,
@@ -688,7 +775,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
 
     st.session_state["_edit_assignment_id"] = ""
 
-    courses = _read_courses_file()
+    courses = _read_courses_file() or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
     with st.form("edit_assignment_form"):
         title = st.text_input("Assignment Name", value=assignment.get("title", ""), key=f"edit_title_{aid}")
         course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key=f"edit_course_choice_{aid}")
@@ -708,7 +795,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
             delete_click = st.form_submit_button("🗑️ Delete Assignment")
 
         if updated_click:
-            course_val = (course_free.strip() or course_choice or "MATH").upper()
+            course_val = (course_free.strip() or course_choice or "GENERAL").upper()
             updated = {
                 "id": aid,
                 "user_id": user_id,
@@ -730,20 +817,24 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
             safe_rerun()
 
 
-@dialog_decorator("Manage Classes")
+@dialog_decorator("Manage / Change Courses")
 def show_manage_courses_dialog():
     st.session_state["_open_manage_courses"] = False
 
-    st.subheader("Your Classes")
+    st.subheader("📚 Your Active Classes")
     courses = _read_courses_file()
     to_remove = []
-    for i, c in enumerate(courses):
-        col_a, col_b = st.columns([6, 2])
-        with col_a:
-            st.write(f"• **{c}**")
-        with col_b:
-            if st.button("Remove", key=f"remove_course_{i}"):
-                to_remove.append(c)
+    
+    if courses:
+        for i, c in enumerate(courses):
+            col_a, col_b = st.columns([6, 2])
+            with col_a:
+                st.write(f"• **{c}**")
+            with col_b:
+                if st.button("Remove", key=f"remove_course_{i}"):
+                    to_remove.append(c)
+    else:
+        st.info("No active classes found. Add your subjects below.")
 
     if to_remove:
         courses = [c for c in courses if c not in to_remove]
@@ -751,7 +842,7 @@ def show_manage_courses_dialog():
         safe_rerun()
 
     st.markdown("---")
-    new_course = st.text_input("Add a new course", key="new_course_field")
+    new_course = st.text_input("Add a new course", key="new_course_field", placeholder="e.g. AP CALCULUS")
     if st.button("Add Course", key="add_course_button"):
         v = new_course.strip().upper()
         if v:
@@ -789,6 +880,7 @@ else:
                     st.sidebar.error(f"Sign up failed: {res.get('error')}")
                 else:
                     st.sidebar.success("Sign up successful. Check your email if confirmation is required.")
+                    st.session_state["_show_welcome_courses_modal"] = True
             else:
                 res = sign_in(email, password)
                 err = res.get("error")
@@ -802,6 +894,9 @@ else:
                     st.sidebar.error("Sign in failed: could not extract user. Check credentials or Supabase config.")
                 else:
                     st.session_state.user = user_obj
+                    # Trigger setup modal if user has no saved courses
+                    if not _read_courses_file():
+                        st.session_state["_show_welcome_courses_modal"] = True
                     safe_rerun()
 
 # Stop if not signed in
@@ -815,6 +910,10 @@ if not user_id:
     st.error("Could not determine user ID from the signed-in user.")
     st.stop()
 
+# Auto-trigger class setup popup if user has no saved courses
+if not _read_courses_file() and "_show_welcome_courses_modal" not in st.session_state:
+    st.session_state["_show_welcome_courses_modal"] = True
+
 # -----------------------
 # State Flags & Safe Dialog Launchers
 # -----------------------
@@ -824,6 +923,9 @@ if "_open_manage_courses" not in st.session_state:
     st.session_state["_open_manage_courses"] = False
 if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
+
+if st.session_state.get("_show_welcome_courses_modal", False):
+    show_welcome_courses_dialog()
 
 if st.session_state.get("_open_add_modal", False):
     show_add_assignment_dialog(user_id)
@@ -837,7 +939,7 @@ if st.session_state.get("_open_manage_courses", False):
 # -----------------------
 # Top Header Bar
 # -----------------------
-col_header_left, col_header_right = st.columns([2.5, 2])
+col_header_left, col_header_right = st.columns([2.2, 2.3])
 
 with col_header_left:
     st.markdown(
@@ -851,7 +953,7 @@ with col_header_left:
     )
 
 with col_header_right:
-    btn_col1, btn_col2, btn_col3 = st.columns([1.2, 1.3, 1.4])
+    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1.2, 1.3, 1.4, 1.5])
     with btn_col1:
         if st.button("🧹 Clear Completed", key="toolbar_clear"):
             rows = _read_data_file()
@@ -863,6 +965,10 @@ with col_header_right:
             st.session_state["_open_add_modal"] = True
             safe_rerun()
     with btn_col3:
+        if st.button("📚 Change Courses", key="toolbar_courses"):
+            st.session_state["_open_manage_courses"] = True
+            safe_rerun()
+    with btn_col4:
         st.markdown(
             '<div class="status-engine-pill"><span class="green-dot"></span> Secure Link Engine</div>',
             unsafe_allow_html=True,
@@ -925,11 +1031,24 @@ else:
                     priority = row.get("priority") or "Low"
                     row_dict = row.to_dict()
 
-                    # Top Card Row: Interactive Checkbox, Course Badge, Edit Button, Status Selector
-                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.5, 1.7, 0.9, 1.8])
+                    # Dynamic CSS Status Class
+                    status_class = "status-not-started"
+                    if status == "In Progress":
+                        status_class = "status-in-progress"
+                    elif status == "Done":
+                        status_class = "status-done"
+
+                    # Dynamic CSS Priority Class
+                    prio_class = "prio-low"
+                    if priority == "Medium":
+                        prio_class = "prio-medium"
+                    elif priority == "High":
+                        prio_class = "prio-high"
+
+                    # Top Card Row: Unsquished Ratios
+                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.8, 1.1, 2.0])
                     
                     with c_top1:
-                        # Real-time interactive completion checkbox
                         chk_key = f"chk_done_{aid}"
                         st.checkbox(
                             "Done",
@@ -949,6 +1068,7 @@ else:
                             safe_rerun()
                     
                     with c_top4:
+                        st.markdown(f"<div class='{status_class}'>", unsafe_allow_html=True)
                         sel_key = f"status_sel_{aid}"
                         st.selectbox(
                             "Status",
@@ -959,6 +1079,7 @@ else:
                             on_change=on_status_change,
                             args=(aid, row_dict)
                         )
+                        st.markdown("</div>", unsafe_allow_html=True)
 
                     # Card Title
                     st.markdown(f"<div class='card-title'>{title}</div>", unsafe_allow_html=True)
@@ -969,18 +1090,19 @@ else:
                     # Horizontal Separator
                     st.markdown("<hr class='card-hr'/>", unsafe_allow_html=True)
 
-                    # Footer Row: Due Date & Priority Dropdown
-                    c_bot1, c_bot2 = st.columns([1.6, 1.4])
+                    # Footer Row: Unsquished Ratios
+                    c_bot1, c_bot2 = st.columns([1.5, 1.8])
                     with c_bot1:
                         st.markdown(
                             f"<div class='due-date-text'><span>📅</span> {due_text} <span class='days-badge'>{days_text}</span></div>",
                             unsafe_allow_html=True,
                         )
                     with c_bot2:
-                        prio_col1, prio_col2 = st.columns([1, 1.2])
+                        prio_col1, prio_col2 = st.columns([0.9, 1.5])
                         with prio_col1:
                             st.markdown("<div class='prio-label'>PRIORITY:</div>", unsafe_allow_html=True)
                         with prio_col2:
+                            st.markdown(f"<div class='{prio_class}'>", unsafe_allow_html=True)
                             prio_key = f"prio_sel_{aid}"
                             st.selectbox(
                                 "Priority",
@@ -991,3 +1113,4 @@ else:
                                 on_change=on_priority_change,
                                 args=(aid, row_dict)
                             )
+                            st.markdown("</div>", unsafe_allow_html=True)
