@@ -1,12 +1,11 @@
 """
 Assignment Tracker — Dark Matrix Overlay UI
 
-Updates:
-- Added '📚 Change Courses' button in the top header toolbar
-- Automated first-registration class setup modal for new accounts
-- Fixed squished words and truncated buttons with optimized card column ratios
-- Restored color-coded Status & Priority selectbox badges (Matching Mockup UI)
-- 100% Preserved Supabase Auth & JSON persistence logic
+Fixes & Enhancements:
+- Smart progress restoration: Unchecking a 'Done' task restores its previous state (e.g. 'In Progress') rather than resetting to 'Not Started'.
+- Added '📚 Change Courses' button in toolbar + auto setup popup for new registrations.
+- Restored color-coded badges for Status & Priority.
+- Preserved 100% of Supabase Auth & JSON persistence backend logic.
 """
 
 from __future__ import annotations
@@ -334,9 +333,9 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
         rows = []
     rows = [r for r in rows if r.get("user_id") == user_id]
     if not rows:
-        return pd.DataFrame(columns=["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes"])
+        return pd.DataFrame(columns=["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes", "prev_status"])
     df = pd.DataFrame(rows)
-    for c in ["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes"]:
+    for c in ["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes", "prev_status"]:
         if c not in df.columns:
             df[c] = ""
     return df
@@ -361,11 +360,21 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Real-Time Callback Handlers
+# Real-Time Callback Handlers (Restores Previous Progress)
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     chk_val = st.session_state.get(f"chk_done_{aid}", False)
-    new_status = "Done" if chk_val else "Not Started"
+    if chk_val:
+        # Save previous status before switching to Done
+        current_st = row_dict.get("status", "Not Started")
+        if current_st != "Done":
+            row_dict["prev_status"] = current_st
+        new_status = "Done"
+    else:
+        # Restore saved previous status, defaulting to "Not Started" if none exists
+        prev_st = row_dict.get("prev_status", "Not Started")
+        new_status = prev_st if prev_st != "Done" else "Not Started"
+
     row_dict["status"] = new_status
     st.session_state[f"status_sel_{aid}"] = new_status
     upsert_assignments([row_dict])
@@ -374,6 +383,8 @@ def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
 def on_status_change(aid: str, row_dict: Dict[str, Any]):
     new_status = st.session_state.get(f"status_sel_{aid}")
     if new_status:
+        if new_status != "Done":
+            row_dict["prev_status"] = new_status
         row_dict["status"] = new_status
         st.session_state[f"chk_done_{aid}"] = (new_status == "Done")
         upsert_assignments([row_dict])
@@ -443,7 +454,7 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS Styling (Matches Mockup UI + Fixes Word Squishing)
+# CSS Styling (Matches Mockup UI)
 # -----------------------
 st.markdown(
     """
@@ -555,7 +566,7 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
-    /* Edit Button Styling (Prevents Truncation into '...') */
+    /* Edit Button Styling */
     button[key^="edit_btn_"] {
         padding: 3px 10px !important;
         font-size: 0.8rem !important;
@@ -646,7 +657,7 @@ st.markdown(
         margin-top: 8px;
     }
 
-    /* Status Selectbox Color Badge Styles */
+    /* Selectbox Styling Override */
     div[data-baseweb="select"] {
         border-radius: 8px !important;
         font-size: 0.82rem !important;
@@ -753,6 +764,7 @@ def show_add_assignment_dialog(user_id: str):
                 "eta": eta.strip(),
                 "created_at": datetime.utcnow().isoformat(),
                 "notes": notes.strip(),
+                "prev_status": status,
             }
             upsert_assignments([new_row])
             if course_free.strip():
@@ -808,6 +820,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
                 "eta": eta.strip(),
                 "created_at": assignment.get("created_at") or datetime.utcnow().isoformat(),
                 "notes": notes.strip(),
+                "prev_status": status if status != "Done" else assignment.get("prev_status", "Not Started"),
             }
             upsert_assignments([updated])
             safe_rerun()
@@ -894,7 +907,6 @@ else:
                     st.sidebar.error("Sign in failed: could not extract user. Check credentials or Supabase config.")
                 else:
                     st.session_state.user = user_obj
-                    # Trigger setup modal if user has no saved courses
                     if not _read_courses_file():
                         st.session_state["_show_welcome_courses_modal"] = True
                     safe_rerun()
@@ -1045,7 +1057,7 @@ else:
                     elif priority == "High":
                         prio_class = "prio-high"
 
-                    # Top Card Row: Unsquished Ratios
+                    # Top Card Row
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.8, 1.1, 2.0])
                     
                     with c_top1:
@@ -1090,7 +1102,7 @@ else:
                     # Horizontal Separator
                     st.markdown("<hr class='card-hr'/>", unsafe_allow_html=True)
 
-                    # Footer Row: Unsquished Ratios
+                    # Footer Row
                     c_bot1, c_bot2 = st.columns([1.5, 1.8])
                     with c_bot1:
                         st.markdown(
