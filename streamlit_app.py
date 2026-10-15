@@ -1,20 +1,9 @@
 """
 Assignment Tracker — Streamlit app with Supabase auth + JSON persistence fallback
 
-This is a rewritten `streamlit_app.py` that:
-- Ensures the Supabase client is created from Streamlit secrets
-- Provides robust sign_in / sign_up wrappers that tolerate different supabase-py versions and call signatures
-- Emits helpful debug output (available auth methods and raw responses)
-- Uses a small JSON-backed storage (data.json) for assignments so the app runs without a DB
-- Keeps the original app UX: sign in/up in sidebar, add/list assignments when authenticated
-
-Install:
-pip install -r requirements.txt
-
-Set Streamlit secrets (either via .streamlit/secrets.toml or Streamlit Cloud):
-[supabase]
-url = "https://YOURPROJECT.supabase.co"
-key = "YOUR_ANON_KEY"
+This version removes the debugging output shown in the sidebar so normal users
+won't see internal debug info. It keeps the robust sign_in / sign_up wrappers
+(to tolerate different supabase-py versions) but does not render debug data.
 """
 from __future__ import annotations
 
@@ -57,7 +46,6 @@ st.title("Assignment Tracker (Multi-user)")
 def _wrap_result(res: Any) -> Dict[str, Any]:
     """Normalize different response shapes into a dict with error/data keys."""
     if isinstance(res, dict):
-        # may already be normalized
         return res
     try:
         return {"error": getattr(res, "error", None), "data": getattr(res, "data", None)}
@@ -86,27 +74,6 @@ def _to_dict(obj: Any) -> Optional[Dict[str, Any]]:
         except Exception:
             pass
     return None
-
-
-def debug_print_response(label: str, value: Any) -> None:
-    """Render debug info in the sidebar without crashing the app."""
-    try:
-        st.sidebar.markdown(f"**DEBUG: {label}**")
-        st.sidebar.write("type:", type(value))
-        if isinstance(value, dict) or isinstance(value, (list, tuple)):
-            st.sidebar.json(value)
-        else:
-            data = _to_dict(value)
-            if isinstance(data, dict):
-                st.sidebar.json(data)
-            else:
-                try:
-                    st.sidebar.write(str(value))
-                except Exception:
-                    st.sidebar.write("Could not stringify response")
-    except Exception as e:
-        # render failure shouldn't block the app
-        st.sidebar.write(f"DEBUG render failed for {label}: {e}")
 
 
 def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
@@ -174,7 +141,7 @@ def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
 
 
 # -----------------------
-# Auth helpers (robust)
+# Auth helpers (robust, no debug output)
 # -----------------------
 def _available_auth_methods() -> List[str]:
     try:
@@ -190,12 +157,11 @@ def sign_up(email: str, password: str) -> Dict[str, Any]:
     """
     Robust sign up wrapper:
     - Tries multiple method names and both dict-style and kwargs-style calls.
-    - Returns a dict with 'error', 'data' and 'auth_methods' keys.
+    - Returns a dict with 'error' and 'data' keys.
     """
-    methods = _available_auth_methods()
     auth = getattr(sb, "auth", None)
     if auth is None:
-        return {"error": "sb.auth is not available", "data": None, "auth_methods": methods}
+        return {"error": "sb.auth is not available", "data": None}
 
     try:
         # prefer sign_up then sign_up_with_password variants
@@ -210,25 +176,22 @@ def sign_up(email: str, password: str) -> Dict[str, Any]:
             except TypeError:
                 res = auth.sign_up_with_password(email=email, password=password)
         else:
-            return {"error": "No supported sign-up method found", "data": None, "auth_methods": methods}
+            return {"error": "No supported sign-up method found", "data": None}
 
-        wrapped = _wrap_result(res)
-        wrapped.setdefault("auth_methods", methods)
-        return wrapped
+        return _wrap_result(res)
     except Exception as e:
-        return {"error": str(e), "data": None, "auth_methods": methods}
+        return {"error": str(e), "data": None}
 
 
 def sign_in(email: str, password: str) -> Dict[str, Any]:
     """
     Robust sign in wrapper:
     - Tries sign_in_with_password, sign_in, and tolerates call signature differences.
-    - Returns a dict with 'error', 'data' and 'auth_methods' keys.
+    - Returns a dict with 'error' and 'data' keys.
     """
-    methods = _available_auth_methods()
     auth = getattr(sb, "auth", None)
     if auth is None:
-        return {"error": "sb.auth is not available", "data": None, "auth_methods": methods}
+        return {"error": "sb.auth is not available", "data": None}
 
     try:
         if hasattr(auth, "sign_in_with_password"):
@@ -242,13 +205,11 @@ def sign_in(email: str, password: str) -> Dict[str, Any]:
             except TypeError:
                 res = auth.sign_in(email=email, password=password)
         else:
-            return {"error": "No supported sign-in method found", "data": None, "auth_methods": methods}
+            return {"error": "No supported sign-in method found", "data": None}
 
-        wrapped = _wrap_result(res)
-        wrapped.setdefault("auth_methods", methods)
-        return wrapped
+        return _wrap_result(res)
     except Exception as e:
-        return {"error": str(e), "data": None, "auth_methods": methods}
+        return {"error": str(e), "data": None}
 
 
 def sign_out() -> None:
@@ -259,7 +220,6 @@ def sign_out() -> None:
             try:
                 auth.sign_out()
             except Exception:
-                # ignore server-side sign out failures
                 pass
     except Exception:
         pass
@@ -362,13 +322,6 @@ def delete_assignment(assignment_id: str) -> None:
 # -----------------------
 # UI: Authentication
 # -----------------------
-# Show available auth methods to help debug client-version mismatches
-try:
-    st.sidebar.markdown("**DEBUG: supabase auth methods**")
-    st.sidebar.write(_available_auth_methods())
-except Exception:
-    pass
-
 user = current_user()
 if user:
     # show signed-in email if available
@@ -389,7 +342,6 @@ else:
             password = password.strip()
             if auth_mode == "Sign up":
                 r = sign_up(email, password)
-                debug_print_response("sign_up result", r)
                 err = r.get("error")
                 if err:
                     st.sidebar.error(f"Sign up failed: {err}")
@@ -397,27 +349,17 @@ else:
                     st.sidebar.success("Sign up successful. Check your email if confirmation is required; then sign in.")
             else:
                 r = sign_in(email, password)
-                debug_print_response("sign_in result", r)
-
                 err = r.get("error")
                 data = r.get("data") if isinstance(r, dict) else getattr(r, "data", None)
-                # Try to extract user from the whole response object first
+
                 user_obj = extract_user_from_auth_response(r)
-                # fallback: look into data mapping
                 if not user_obj and isinstance(data, dict):
                     user_obj = data.get("user") or (data.get("session") or {}).get("user")
-
-                # If auth_methods were included, show them for debugging
-                if isinstance(r, dict) and "auth_methods" in r:
-                    st.sidebar.markdown("**DEBUG: auth methods**")
-                    st.sidebar.write(r["auth_methods"])
 
                 if err:
                     st.sidebar.error(f"Sign in failed: {err}")
                 elif not user_obj:
                     st.sidebar.error("Sign in failed: could not extract user. Check credentials or your Supabase config.")
-                    # show the raw data to help diagnose
-                    debug_print_response("sign_in raw data", r)
                 else:
                     st.session_state.user = user_obj
                     try:
