@@ -6,7 +6,7 @@ Requirements:
 - Add the Supabase URL & ANON KEY to Streamlit secrets.
 - Install requirements in requirements.txt (streamlit, pandas, supabase).
 
-Streamlit secrets example (.streamlit/secrets.toml or Streamlit Cloud Secrets):
+Example Streamlit secrets:
 [supabase]
 url = "https://YOURPROJECT.supabase.co"
 key = "YOUR_ANON_KEY"
@@ -35,10 +35,9 @@ st.set_page_config(page_title="Assignment Tracker (Multi-user)", layout="wide")
 st.title("Assignment Tracker (Multi-user)")
 
 # -----------------------
-# Helpers
+# Auth helpers
 # -----------------------
 def _wrap_result(res):
-    """Normalize supabase client result to a dict-like with optional 'error' and 'data' keys."""
     if isinstance(res, dict):
         return res
     try:
@@ -47,102 +46,39 @@ def _wrap_result(res):
         return {"error": None, "data": None}
 
 
-# -----------------------
-# Auth helpers
-# -----------------------
 def current_user():
     """Return current user dict from Supabase client (or None)."""
     try:
-        # Most clients offer get_session()
-        session = None
-        if hasattr(sb.auth, "get_session"):
-            session = sb.auth.get_session()
-        elif hasattr(sb.auth, "get_user"):
-            # fallback: try get_user
-            session = sb.auth.get_user()
-        # session may be dict or object
+        session = sb.auth.get_session()
+    except Exception:
+        return None
+
+    try:
         if isinstance(session, dict):
-            # many responses: {"data": {"session": {"user": {...}}}} or {"data": {"user": {...}}}
             data = session.get("data", session)
             if isinstance(data, dict):
-                # prefer session.user
                 user = data.get("session", {}).get("user") or data.get("user")
                 return user
-        # object-style
-        return getattr(session, "user", None) or getattr(session, "data", None) and getattr(getattr(session, "data", None), "get", lambda *_: None)("user")
+        return getattr(session, "user", None)
     except Exception:
-        # Last resort: try sb.auth.get_user (some versions)
-        try:
-            res = sb.auth.get_user()
-            if isinstance(res, dict):
-                return res.get("data", {}).get("user") or res.get("user")
-            return getattr(res, "data", None) and getattr(getattr(res, "data", None), "get", lambda *_: None)("user")
-        except Exception:
-            return None
+        return None
 
 
 def sign_up(email: str, password: str):
-    """
-    Use the sign_up method your auth client exposes (dict-style payload).
-    Returns normalized dict-like result.
-    """
     try:
-        # preferred call on your client
         res = sb.auth.sign_up({"email": email, "password": password})
         return _wrap_result(res)
-    except AttributeError:
-        return {"error": "sign_up not available on sb.auth", "data": None}
     except Exception as e:
         return {"error": str(e), "data": None}
 
 
 def sign_in(email: str, password: str):
-    """
-    Use sign_in_with_password which the auth client exposes.
-    Returns normalized dict-like result.
-    """
     try:
         res = sb.auth.sign_in_with_password({"email": email, "password": password})
         return _wrap_result(res)
-    except AttributeError:
-        return {"error": "sign_in_with_password not available on sb.auth", "data": None}
     except Exception as e:
         return {"error": str(e), "data": None}
 
-def _debug_signin_result(r):
-    """Safe debug: print types and keys/attrs without printing token values."""
-    try:
-        st.sidebar.write("SIGN-IN DEBUG")
-        st.sidebar.write("result type:", type(r))
-        if isinstance(r, dict):
-            st.sidebar.write("result keys:", list(r.keys()))
-            st.sidebar.write("error:", bool(r.get("error")))
-            data = r.get("data")
-            st.sidebar.write("data type:", type(data))
-            if isinstance(data, dict):
-                st.sidebar.write("data keys:", list(data.keys()))
-                if "session" in data and isinstance(data["session"], dict):
-                    st.sidebar.write("'session' keys:", list(data["session"].keys()))
-                    st.sidebar.write("'session' contains user?:", "user" in data["session"])
-                if "user" in data and isinstance(data["user"], dict):
-                    st.sidebar.write("'user' keys:", list(data["user"].keys()))
-        else:
-            # object-style responses
-            attrs = [a for a in dir(r) if not a.startswith("_")]
-            st.sidebar.write("result attrs (sample):", attrs[:40])
-            try:
-                has_user = hasattr(r, "user")
-                st.sidebar.write("has .user attribute?:", has_user)
-                if has_user:
-                    u = getattr(r, "user")
-                    st.sidebar.write("user type:", type(u))
-                    if isinstance(u, dict):
-                        st.sidebar.write("user keys:", list(u.keys()))
-            except Exception as e:
-                st.sidebar.write("error inspecting .user:", str(e))
-    except Exception as _e:
-        # avoid crashing the app if debug itself fails
-        pass
 
 def sign_out():
     try:
@@ -153,11 +89,10 @@ def sign_out():
         if k in st.session_state:
             del st.session_state[k]
     try:
-        st.experimental_rerun()
+        st.rerun()
     except Exception:
         try:
-            if hasattr(st, "rerun"):
-                st.rerun()
+            st.experimental_rerun()
         except Exception:
             pass
 
@@ -168,6 +103,7 @@ def sign_out():
 def fetch_assignments(user_id: str) -> pd.DataFrame:
     if not user_id:
         return pd.DataFrame(columns=["id", "title", "course", "due_date", "status", "notes", "created_at", "user_id"])
+
     try:
         res = sb.table("assignments").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
     except Exception:
@@ -189,6 +125,7 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
             df[col] = ""
     if "user_id" not in df.columns:
         df["user_id"] = user_id
+
     return df[["id", "title", "course", "due_date", "status", "notes", "created_at", "user_id"]]
 
 
@@ -225,6 +162,7 @@ else:
         email = st.text_input("Email", key="auth_email")
         password = st.text_input("Password", type="password", key="auth_pw")
         submitted = st.form_submit_button(auth_mode)
+
         if submitted:
             if auth_mode == "Sign up":
                 r = sign_up(email.strip(), password)
@@ -258,15 +196,13 @@ else:
                 else:
                     st.session_state.user = user_obj
                     try:
-                        st.experimental_rerun()
+                        st.rerun()
                     except Exception:
                         try:
-                            if hasattr(st, "rerun"):
-                                st.rerun()
+                            st.experimental_rerun()
                         except Exception:
                             pass
 
-# refresh user info from session_state (if sign in stored it)
 if "user" in st.session_state:
     user = st.session_state.user
 
@@ -284,6 +220,7 @@ if not user_id:
 # -----------------------
 st.sidebar.markdown("---")
 st.sidebar.header("Add assignment")
+
 with st.sidebar.form("add_form", clear_on_submit=True):
     t = st.text_input("Title", "")
     c = st.text_input("Course", "")
@@ -291,6 +228,7 @@ with st.sidebar.form("add_form", clear_on_submit=True):
     s = st.selectbox("Status", STATUS_OPTIONS, index=0)
     n = st.text_area("Notes", "")
     submitted = st.form_submit_button("Add assignment")
+
     if submitted:
         new_row = {
             "id": str(uuid.uuid4()),
@@ -308,15 +246,16 @@ with st.sidebar.form("add_form", clear_on_submit=True):
 
 st.markdown("---")
 
-# Load assignments for the current user (cached in session_state to reduce calls)
 if "df_cached" not in st.session_state:
     st.session_state.df_cached = fetch_assignments(user_id)
+
 df = st.session_state.df_cached.copy()
 
 # Summary stats
 total = len(df)
 in_progress = df["status"].eq("In Progress").sum() if "status" in df else 0
 completed = df["status"].eq("Completed").sum() if "status" in df else 0
+
 st.metric("Total", total)
 col1, col2 = st.columns(2)
 col1.metric("In Progress", in_progress)
@@ -341,21 +280,10 @@ else:
     display_df = filtered.copy()
     display_df["due_date"] = display_df["due_date"].replace("", pd.NA)
 
-    # Try available data editor APIs across Streamlit versions
-    editor_result = None
     try:
         edited = st.experimental_data_editor(display_df.drop(columns=["user_id"]), num_rows="dynamic")
-        editor_result = edited
-    except Exception:
-        try:
-            edited = st.data_editor(display_df.drop(columns=["user_id"]), num_rows="dynamic")
-            editor_result = edited
-        except Exception:
-            editor_result = None
-
-    if editor_result is not None:
         if st.button("Save edits"):
-            new_df = editor_result.fillna("").copy()
+            new_df = edited.fillna("").copy()
             records = []
             for _, row in new_df.iterrows():
                 rid = row.get("id") or str(uuid.uuid4())
@@ -374,14 +302,13 @@ else:
             st.success("Saved changes")
             st.session_state.df_cached = fetch_assignments(user_id)
             try:
-                st.experimental_rerun()
+                st.rerun()
             except Exception:
                 try:
-                    if hasattr(st, "rerun"):
-                        st.rerun()
+                    st.experimental_rerun()
                 except Exception:
                     pass
-    else:
+    except Exception:
         st.dataframe(display_df.drop(columns=["user_id"]))
         st.info("Inline editor not available in this Streamlit version; use actions below to modify data.")
 
