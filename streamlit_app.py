@@ -1,14 +1,28 @@
 """
-Assignment Tracker — updated UI, fixed toolbar and card layout, larger buttons, modal edit/add
+Assignment Tracker — Polished UI pass
 
-Notes on fixes:
-- Removed duplicate title and unified header rendering.
-- Avoid calling st.rerun / st.experimental_rerun directly from inside helper render functions;
-  instead button clicks set session_state flags and actions occur immediately after render.
-- Enlarged and restyled buttons with CSS so labels fit.
-- Narrowed assignment cards (max-width) and added gradients, shadows, badges to match screenshots.
-- Ensured unique keys for buttons and stable behavior on clicks.
-- Keeps Supabase auth + JSON fallback and Manage Classes feature.
+This file is an improved replacement for streamlit_app.py that focuses on
+visual polish, clearer card boundaries, reliable button layout, and readable
+text. It preserves the existing functionality:
+- Supabase auth wrappers (optional, via Streamlit secrets)
+- JSON fallback persistence for assignments and classes
+- Add / Edit modals, Manage Classes modal
+- Search, sort, clear completed, add/edit/delete/mark-done actions
+
+What's improved in this version:
+- Cards are compact (fixed max width), clearly separated with stronger
+  borders, multi-layer shadows, and subtle gradients.
+- Buttons are larger with consistent spacing and don't overlap.
+- Priority is displayed as a clearly visible badge (never left blank).
+- Title and other text wrap properly; no truncated text.
+- Action buttons inside each card are spaced and readable.
+- The top toolbar buttons are larger and spaced out.
+- The calendar banner uses the current date (auto-rotates daily).
+
+Notes:
+- Streamlit CSS is used to style built-in Streamlit buttons and inputs.
+- We keep usage of Streamlit primitives (st.button, st.columns, st.modal).
+- If you want pixel-perfect matching to a mockup, we can fine-tune colors/spacing further.
 """
 from __future__ import annotations
 
@@ -28,7 +42,7 @@ from supabase import Client, create_client
 DATA_FILE = Path("data.json")
 COURSES_FILE = Path("courses.json")
 
-# Supabase credentials MUST be stored in Streamlit secrets under [supabase]
+# Supabase credentials (optional)
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"]
     SUPABASE_KEY = st.secrets["supabase"]["key"]
@@ -43,7 +57,7 @@ if SUPABASE_URL and SUPABASE_KEY:
     except Exception:
         sb = None
 
-# App constants / options
+# Options
 STATUS_OPTIONS = ["Not Started", "In Progress", "Done"]
 PRIORITY_OPTIONS = ["Low", "Medium", "High"]
 TYPE_OPTIONS = ["Essay", "Presentation", "Homework", "Test & Quizzes", "Other"]
@@ -57,7 +71,7 @@ SORT_OPTIONS = [
 st.set_page_config(page_title="Assignment Tracker", layout="wide")
 
 # -----------------------
-# Helpers for responses / mapping
+# Small helpers
 # -----------------------
 def _to_dict(obj: Any) -> Optional[Dict[str, Any]]:
     if obj is None:
@@ -85,7 +99,7 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
     if isinstance(res, dict):
         mapped = _to_dict(res) or res
         return {
-            "error": res.get("error") if isinstance(res, dict) else None,
+            "error": res.get("error", None) if isinstance(res, dict) else None,
             "data": res.get("data") if isinstance(res, dict) and "data" in res else mapped,
             "raw": mapped,
         }
@@ -105,12 +119,12 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
 
 
 # -----------------------
-# Auth helpers (safe wrappers)
+# Auth helpers (robust)
 # -----------------------
 def sign_up(email: str, password: str) -> Dict[str, Any]:
     auth = getattr(sb, "auth", None) if sb else None
     if auth is None:
-        return {"error": "sb.auth is not available", "data": None, "raw": None}
+        return {"error": "sb.auth not available", "data": None}
     try:
         if hasattr(auth, "sign_up"):
             try:
@@ -123,16 +137,16 @@ def sign_up(email: str, password: str) -> Dict[str, Any]:
             except TypeError:
                 res = auth.sign_up_with_password(email=email, password=password)
         else:
-            return {"error": "No supported sign-up method found", "data": None, "raw": None}
+            return {"error": "No supported sign-up method found", "data": None}
         return _wrap_result(res)
     except Exception as e:
-        return {"error": str(e), "data": None, "raw": None}
+        return {"error": str(e), "data": None}
 
 
 def sign_in(email: str, password: str) -> Dict[str, Any]:
     auth = getattr(sb, "auth", None) if sb else None
     if auth is None:
-        return {"error": "sb.auth is not available", "data": None, "raw": None}
+        return {"error": "sb.auth not available", "data": None}
     try:
         if hasattr(auth, "sign_in_with_password"):
             try:
@@ -145,10 +159,10 @@ def sign_in(email: str, password: str) -> Dict[str, Any]:
             except TypeError:
                 res = auth.sign_in(email=email, password=password)
         else:
-            return {"error": "No supported sign-in method found", "data": None, "raw": None}
+            return {"error": "No supported sign-in method found", "data": None}
         return _wrap_result(res)
     except Exception as e:
-        return {"error": str(e), "data": None, "raw": None}
+        return {"error": str(e), "data": None}
 
 
 def sign_out() -> None:
@@ -164,7 +178,6 @@ def sign_out() -> None:
     for k in ["user", "df_cached"]:
         if k in st.session_state:
             del st.session_state[k]
-    # simple rerun
     try:
         st.experimental_rerun()
     except Exception:
@@ -337,7 +350,7 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Date & formatting helpers
+# Date helpers & formatting
 # -----------------------
 def parse_date_iso_or_empty(s: Any) -> Optional[date]:
     if s is None:
@@ -392,58 +405,80 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
     if sort_by == "Created (Newest)":
         df["created_at_parsed"] = pd.to_datetime(df["created_at"], errors="coerce")
         return df.sort_values(by=["created_at_parsed"], ascending=False).drop(columns=["created_at_parsed"])
-    return df  # default: spreadsheet order
+    return df
 
 
 # -----------------------
-# Styling — carefully tuned
+# Polished styling (stronger outlines, shadows, spacing)
 # -----------------------
 st.markdown(
     """
     <style>
-    /* Page background & defaults */
+    /* Page background & base font */
     .stApp {
-        background-color: #0b1220;
+        background: linear-gradient(180deg,#071019,#0b1420);
         color: #e6eef9;
         font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
     }
 
-    /* Make Streamlit native buttons larger and more pill-like */
+    /* Header */
+    .app-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .app-title { font-size:34px; font-weight:800; color:#f8fafc; margin:0; }
+
+    /* Toolbar buttons — larger and spaced */
+    .toolbar-btn { margin-left:8px; margin-right:8px; }
     .stButton>button {
-        padding: 10px 16px !important;
-        font-size: 14px !important;
-        border-radius: 10px !important;
-        min-width: 120px;
+        padding:10px 16px !important;
+        font-size:14px !important;
+        border-radius:10px !important;
+        min-width:130px !important;
+    }
+    /* make toolbar group align right */
+    .toolbar-right { display:flex; gap:12px; align-items:center; justify-content:flex-end; }
+
+    /* Search input bigger */
+    .stTextInput>div>div>input {
+        padding:14px !important;
+        border-radius:10px !important;
+        background: rgba(255,255,255,0.02) !important;
+        color: #e6eef9 !important;
     }
 
-    /* toolbar group spacing */
-    .toolbar-row { display:flex; gap:12px; align-items:center; justify-content:flex-end; }
+    /* Cards container: centered with wrap */
+    .cards-wrap { display:flex; flex-wrap:wrap; gap:18px; align-items:flex-start; justify-content:flex-start; padding-top:12px; }
 
-    /* card styling: narrower, rounded, gradient, shadow */
+    /* Card - compact fixed width, multi-layer shadows, clear outline */
     .card {
-        display:inline-block;
-        vertical-align: top;
-        width: 320px;
-        margin: 12px;
+        width: 330px;
+        min-height: 120px;
         padding: 16px;
-        border-radius: 12px;
-        background: linear-gradient(180deg, rgba(22,27,34,0.75), rgba(10,14,20,0.75));
-        border: 1px solid rgba(255,255,255,0.03);
-        box-shadow: 0 8px 24px rgba(2,6,10,0.6), inset 0 1px 0 rgba(255,255,255,0.02);
-        color: #e6eef9;
+        border-radius: 14px;
+        background: linear-gradient(180deg, rgba(20,25,30,0.9), rgba(12,16,20,0.85));
+        border: 1px solid rgba(255,255,255,0.04);
+        box-shadow:
+            0 10px 30px rgba(2,6,23,0.55),
+            0 2px 8px rgba(2,6,23,0.35),
+            inset 0 1px 0 rgba(255,255,255,0.02);
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
     }
+    .card:hover { transform: translateY(-6px); box-shadow: 0 18px 40px rgba(2,6,23,0.65), 0 6px 12px rgba(2,6,23,0.45); }
 
-    .card .title { font-weight:800; font-size:18px; margin-top:6px; margin-bottom:6px; }
     .course-badge {
         display:inline-block;
-        padding:6px 10px;
+        padding:7px 12px;
         border-radius:10px;
-        background: linear-gradient(90deg, rgba(99,102,241,0.16), rgba(79,70,229,0.08));
-        color:#c7d2fe;
-        font-weight:700;
-        font-size:12px;
+        background: linear-gradient(90deg, rgba(99,102,241,0.18), rgba(79,70,229,0.08));
+        color:#e6eef9; font-weight:800; font-size:12px;
+        border: 1px solid rgba(99,102,241,0.08);
     }
-    .atype { color:#fda4af; margin-top:6px; font-weight:600; font-size:13px; }
+
+    .title { font-weight:800; font-size:18px; margin-top:6px; margin-bottom:8px; color:#e6eef9; word-wrap:break-word; white-space:normal; }
+
+    .atype { color:#fda4af; margin-bottom:10px; font-weight:600; font-size:13px; }
+
+    .card .stButton>button { min-width:110px !important; padding:8px 12px !important; font-size:13px !important; margin-right:8px; border-radius:10px !important; }
+
+    .card-actions { display:flex; gap:12px; align-items:center; margin-top:8px; margin-bottom:8px; }
 
     .pill {
         display:inline-block;
@@ -452,35 +487,35 @@ st.markdown(
         font-weight:700;
         font-size:12px;
     }
-    .pill-not-started { background: rgba(239,68,68,0.08); color:#fca5a5; border: 1px solid rgba(239,68,68,0.06); }
+    .pill-not-started { background: rgba(239,68,68,0.06); color:#fccaca; border: 1px solid rgba(239,68,68,0.06); }
     .pill-in-progress { background: rgba(250,204,21,0.06); color:#fef08a; border: 1px solid rgba(250,204,21,0.06); }
     .pill-done { background: rgba(34,197,94,0.06); color:#bbf7d0; border: 1px solid rgba(34,197,94,0.06); }
 
-    .small-muted { color:#9ca3af; font-size:13px; }
-
-    /* center the cards container */
-    .cards-wrap { display:flex; gap:12px; flex-wrap:wrap; justify-content:flex-start; align-items:flex-start; }
-
-    /* top banner */
-    .banner {
-        padding:10px;
-        border-radius:8px;
-        background: linear-gradient(90deg, rgba(79,70,229,0.08), rgba(56,189,248,0.03));
-        color:#c7d2fe;
-        text-align:center;
-        margin-top:10px;
-        margin-bottom:10px;
+    .priority-badge {
+        display:inline-block;
+        padding:6px 10px;
+        border-radius:10px;
+        font-weight:700;
+        font-size:13px;
+        background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+        border: 1px solid rgba(255,255,255,0.03);
+        color:#d1fae5;
     }
 
-    /* larger search box */
-    .searchbox .stTextInput>div>label { color:#cbd5e1; }
+    .small-muted { color:#9ca3af; font-size:13px; }
+
+    /* Footer spacing */
+    .card-footer { display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:12px; }
+
+    /* Improve visual separation on the page */
+    .section-divider { height:1px; background: linear-gradient(90deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02)); margin-top:12px; margin-bottom:12px; border-radius:2px; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # -----------------------
-# Top header + improved toolbar behavior
+# Top header + toolbar
 # -----------------------
 if "_action_clear_completed" not in st.session_state:
     st.session_state["_action_clear_completed"] = False
@@ -492,28 +527,25 @@ if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
 
 def render_top_toolbar():
-    # Single header with subtitle (no duplicate st.title)
-    cols = st.columns([3, 1])
-    with cols[0]:
-        st.markdown("<div style='display:flex; flex-direction:column; gap:4px;'><div style='display:flex; align-items:center; gap:12px'><div style='font-size:34px; font-weight:800'>📋 Assignment Tracker</div></div><div class='small-muted'>Live application syncing — keep your classes up to date</div></div>", unsafe_allow_html=True)
-    with cols[1]:
-        # toolbar buttons - use st.button so actions are wired to session_state flags
-        c1, c2, c3 = st.columns([1,1,1])
-        with c1:
+    left_col, right_col = st.columns([3, 1])
+    with left_col:
+        st.markdown("<div class='app-header'><div><h1 class='app-title'>📋 Assignment Tracker</h1><div class='small-muted'>Live application syncing — keep your classes up to date</div></div></div>", unsafe_allow_html=True)
+    with right_col:
+        # toolbar group
+        with st.container():
+            st.markdown("<div class='toolbar-right'>", unsafe_allow_html=True)
             if st.button("🧹 Clear Completed", key="clear_completed_button"):
                 st.session_state["_action_clear_completed"] = True
-        with c2:
             if st.button("➕ Add Assignment", key="add_assignment_button"):
                 st.session_state["_open_add_modal"] = True
-        with c3:
             if st.button("📚 Manage Classes", key="manage_classes_button"):
                 st.session_state["_open_manage_courses"] = True
+            st.markdown("</div>", unsafe_allow_html=True)
 
 render_top_toolbar()
 
-# After top render, handle flags (so we do side-effects outside render function)
+# handle clear completed action outside render
 if st.session_state.get("_action_clear_completed", False):
-    # perform clearing then rerun once
     user = current_user()
     if user:
         all_rows = _read_data_file()
@@ -523,12 +555,12 @@ if st.session_state.get("_action_clear_completed", False):
     st.session_state["_action_clear_completed"] = False
     st.experimental_rerun()
 
-# Banner with today's date (auto-updates daily)
+# date banner (auto-updates daily)
 today_str = datetime.today().strftime("%A, %B %d, %Y")
-st.markdown(f"<div class='banner'>📅 Today's Matrix Operations Calendar: {today_str}</div>", unsafe_allow_html=True)
+st.markdown(f"<div style='margin-top:10px; margin-bottom:12px; padding:10px; border-radius:8px; background: linear-gradient(90deg, rgba(79,70,229,0.06), rgba(6,182,212,0.02)); color:#c7d2fe; text-align:center;'>📅 Today's Matrix Operations Calendar: {today_str}</div>", unsafe_allow_html=True)
 
 # -----------------------
-# Sidebar auth UI (unchanged behavior)
+# Sidebar auth
 # -----------------------
 user = current_user()
 if user:
@@ -570,20 +602,19 @@ else:
                     except Exception:
                         pass
 
-# -----------------------
-# Require signed-in user
-# -----------------------
+# require sign-in
 user = current_user()
 if not user:
     st.info("Please sign in or sign up in the sidebar to manage your assignments.")
     st.stop()
+
 user_id = user.get("id") or user.get("sub") or user.get("user_id")
 if not user_id:
     st.error("Could not determine user id from Supabase user.")
     st.stop()
 
 # -----------------------
-# Manage classes modal (unchanged flow but stable)
+# Manage classes modal
 # -----------------------
 if st.session_state.get("_open_manage_courses", False):
     with st.modal("Manage Classes"):
@@ -591,20 +622,18 @@ if st.session_state.get("_open_manage_courses", False):
         courses = _read_courses_file()
         to_remove = []
         for i, c in enumerate(courses):
-            a, b = st.columns([8,1])
+            a, b = st.columns([10,1])
             with a:
-                st.write(f"- {c}")
+                st.write(f"• {c}")
             with b:
                 if st.button("Remove", key=f"remove_course_{i}"):
                     to_remove.append(c)
-                    # mark removal and refresh after modal ends
         if to_remove:
             courses = [c for c in courses if c not in to_remove]
             _write_courses_file(courses)
             st.success("Updated classes.")
             st.session_state["_open_manage_courses"] = False
             st.experimental_rerun()
-
         st.markdown("---")
         new_course = st.text_input("Add a new course (e.g., Math 101)", key="new_course_field")
         if st.button("Add Course", key="add_course_btn"):
@@ -624,7 +653,7 @@ if st.session_state.get("_open_manage_courses", False):
             st.experimental_rerun()
 
 # -----------------------
-# Search and sort row
+# Search + Sort row
 # -----------------------
 search_col, sort_col = st.columns([3,1])
 with search_col:
@@ -633,10 +662,10 @@ with sort_col:
     sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="sort_by")
 
 # -----------------------
-# Add assignment modal (state-driven)
+# Add modal
 # -----------------------
 if st.session_state.get("_open_add_modal", False):
-    st.session_state["_open_add_modal"] = False  # consume flag (modal will show once)
+    st.session_state["_open_add_modal"] = False
     with st.modal("Create New Assignment"):
         courses = _read_courses_file()
         with st.form("add_assignment_form"):
@@ -675,8 +704,10 @@ if st.session_state.get("_open_add_modal", False):
                 st.experimental_rerun()
 
 # -----------------------
-# Edit modal: open when session_state._edit_assignment_id is set
+# Edit modal
 # -----------------------
+if "_edit_assignment_id" not in st.session_state:
+    st.session_state["_edit_assignment_id"] = ""
 if st.session_state.get("_edit_assignment_id"):
     aid = st.session_state["_edit_assignment_id"]
     rows = _read_data_file()
@@ -727,94 +758,88 @@ if st.session_state.get("_edit_assignment_id"):
         st.session_state["_edit_assignment_id"] = ""
 
 # -----------------------
-# Load assignments and render cards grid (improved layout)
+# Load assignments and render compact cards
 # -----------------------
-st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 if "df_cached" not in st.session_state:
     st.session_state.df_cached = fetch_assignments(user_id)
 else:
     st.session_state.df_cached = fetch_assignments(user_id)
-
 df = st.session_state.df_cached.copy()
 
-# Apply search
+# Search filter
+search_q = st.session_state.get("search_q", "") if "search_q" in st.session_state else ""
 if search_q:
     q = search_q.lower()
     df = df[df.apply(lambda r: q in str(r.get("title", "")).lower() or q in str(r.get("course", "")).lower() or q in str(r.get("atype", "")).lower(), axis=1)]
 
 # Sort
+sort_by = st.session_state.get("sort_by", SORT_OPTIONS[0]) if "sort_by" in st.session_state else SORT_OPTIONS[0]
 df = sort_df(df, sort_by)
 
-# Helper to open edit modal by setting session_state id
+# Helper to open edit modal
 def open_edit_modal(assign_id: str):
     st.session_state["_edit_assignment_id"] = assign_id
-    # modal will open on rerun
     st.experimental_rerun()
 
-# Render small cards container
-def render_assignment_card(item: Dict[str, Any]):
-    aid = item.get("id")
-    course = item.get("course") or ""
-    title = item.get("title") or ""
-    atype = item.get("atype") or ""
-    due_parsed = parse_date_iso_or_empty(item.get("due_date"))
-    due_text = format_mdy(due_parsed)
-    days_text, _ = days_left(due_parsed)
-    priority = item.get("priority") or ""
-    status = item.get("status") or ""
-
-    status_cls = "pill-not-started"
-    if status == "In Progress":
-        status_cls = "pill-in-progress"
-    elif status == "Done":
-        status_cls = "pill-done"
-
-    # unique action keys per card
-    edit_key = f"card_edit_{aid}"
-    del_key = f"card_delete_{aid}"
-    done_key = f"card_done_{aid}"
-
-    # card markup
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    # top row: badge and title
-    st.markdown(f"<div style='display:flex; align-items:center; gap:10px;'><div class='course-badge'>{course}</div><div class='title'>{title}</div></div>", unsafe_allow_html=True)
-    # type / notes
-    st.markdown(f"<div class='atype'>📌 {atype}</div>", unsafe_allow_html=True)
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-    # actions row
-    a1, a2, a3 = st.columns([1,1,1])
-    with a1:
-        if st.button("✏️ Edit", key=edit_key):
-            open_edit_modal(aid)
-    with a2:
-        if st.button("✅ Mark Done", key=done_key):
-            updated = dict(item)
-            updated["status"] = "Done"
-            upsert_assignments([updated])
-            st.experimental_rerun()
-    with a3:
-        if st.button("🗑️ Delete", key=del_key):
-            delete_assignment(aid)
-            st.experimental_rerun()
-
-    st.markdown("<hr style='border-color: rgba(255,255,255,0.04)'/>", unsafe_allow_html=True)
-    # footer info row
-    f1, f2 = st.columns([2,1])
-    with f1:
-        st.markdown(f"<div class='small-muted'>📅 {due_text} • <span style='background:rgba(255,255,255,0.02); padding:4px 8px; border-radius:6px'>{days_text}</span></div>", unsafe_allow_html=True)
-    with f2:
-        st.markdown(f"<div style='text-align:right'>PRIORITY: <span style='background:rgba(0,0,0,0.25); padding:6px 10px; border-radius:8px; color:#9ae6b4'>{priority}</span></div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# Render all cards inside a wrap
+# Card rendering: each card is placed using a simple loop; CSS keeps them compact
 st.markdown("<div class='cards-wrap'>", unsafe_allow_html=True)
 if df.empty:
     st.markdown("<div style='padding:60px; text-align:center; color:#9ca3af'>🎉 GOOOOOOOODDD BOOOOYYYYY, YOU FINISHED ALL YOUR HOMEWORK, YOU GET THE A+++++++++</div>", unsafe_allow_html=True)
 else:
     items = df.to_dict(orient="records")
     for item in items:
-        render_assignment_card(item)
+        aid = item.get("id")
+        course = item.get("course") or "Unspecified"
+        title = item.get("title") or "(no title)"
+        atype = item.get("atype") or ""
+        due_parsed = parse_date_iso_or_empty(item.get("due_date"))
+        due_text = format_mdy(due_parsed)
+        days_text, _ = days_left(due_parsed)
+        priority = item.get("priority") or "Medium"
+        status = item.get("status") or "Not Started"
+
+        # map status to pill class
+        status_cls = "pill-not-started"
+        if status == "In Progress":
+            status_cls = "pill-in-progress"
+        elif status == "Done":
+            status_cls = "pill-done"
+
+        # Render card markup (use native buttons for actions)
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown(f"<div style='display:flex; align-items:center; gap:12px;'><div class='course-badge'>{course}</div><div style='flex:1;'><div class='title'>{title}</div></div></div>", unsafe_allow_html=True)
+        if atype:
+            st.markdown(f"<div class='atype'>📌 {atype}</div>", unsafe_allow_html=True)
+        # Action buttons row
+        btn_col1, btn_col2, btn_col3 = st.columns([1,1,1])
+        with btn_col1:
+            if st.button("✏️ Edit", key=f"edit_{aid}"):
+                open_edit_modal(aid)
+        with btn_col2:
+            if st.button("✅ Mark Done", key=f"done_{aid}"):
+                updated = dict(item)
+                updated["status"] = "Done"
+                upsert_assignments([updated])
+                st.experimental_rerun()
+        with btn_col3:
+            if st.button("🗑️ Delete", key=f"delete_{aid}"):
+                delete_assignment(aid)
+                st.experimental_rerun()
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+        # Footer: due & days left on left, priority & status on right
+        footer_html = f"""
+            <div class='card-footer'>
+                <div class='small-muted'>📅 {due_text} &nbsp; • &nbsp; <span style='background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:8px'>{days_text}</span></div>
+                <div style='display:flex; gap:10px; align-items:center;'>
+                    <div class='small-muted' style='margin-right:6px'>PRIORITY:</div>
+                    <div class='priority-badge'>{priority}</div>
+                    <div class='pill {status_cls}' style='margin-left:10px'>{status}</div>
+                </div>
+            </div>
+        """
+        st.markdown(footer_html, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("<div style='height:40px'></div>", unsafe_allow_html=True)
