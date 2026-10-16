@@ -1,11 +1,11 @@
 """
-Assignment Tracker — Full-Width Dark Theme with Visible School Domain Auto-Complete
+Assignment Tracker — Full-Width Dark Theme with Live Anchored Domain Suffix
 
 Updates:
-- Prominent visual display for @simsburyschools.net default domain in Sign In / Sign Up popup modal
-- Automatically appends @simsburyschools.net unless an '@' symbol is typed in the email field
-- Full unclipped user email badge & action buttons in the top header
-- 100% sidebar-free layout with full device responsiveness and Supabase/JSON fallback persistence
+- Added anchored @simsburyschools.net domain badge directly next to the username input field
+- Live email preview bar that dynamically renders your full resolved account address as you type
+- Automatic override to custom domain if an '@' symbol is entered
+- 100% full-width layout with Supabase authentication and local JSON fallback persistence
 """
 
 from __future__ import annotations
@@ -533,15 +533,39 @@ st.markdown(
         display: inline-block;
     }
 
-    /* Domain Suffix Helper Text inside Auth Modal */
-    .domain-hint-box {
+    /* Domain Suffix Badge Anchored Next to Input */
+    .domain-badge-active {
         background-color: #1e1b4b;
-        border: 1px solid #312e81;
+        border: 1px solid #4f46e5;
         color: #a5b4fc;
-        padding: 8px 12px;
+        padding: 9px 12px;
         border-radius: 8px;
-        font-size: 0.82rem;
-        margin-bottom: 12px;
+        font-weight: 700;
+        font-size: 0.85rem;
+        text-align: center;
+        white-space: nowrap !important;
+        margin-top: 28px;
+    }
+
+    .domain-badge-active.custom-domain {
+        background-color: #064e3b;
+        border: 1px solid #059669;
+        color: #34d399;
+    }
+
+    /* Live Email Preview Box */
+    .live-email-preview {
+        background-color: #0f172a;
+        border: 1px solid #1e293b;
+        color: #38bdf8;
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 0.83rem;
+        margin-bottom: 14px;
+    }
+
+    .live-email-preview.muted {
+        color: #64748b;
     }
 
     /* Force All Streamlit Buttons To Display Unclipped Text */
@@ -768,61 +792,75 @@ st.markdown(
 def show_auth_dialog():
     st.markdown("### 🔒 Account Authentication")
     mode = st.radio("Choose Action", ["Sign In", "Sign Up"], horizontal=True, key="auth_modal_mode")
+
+    # Side-by-Side Username Input + Anchored Domain Badge
+    col_input, col_badge = st.columns([2.5, 1.5])
     
-    st.markdown(
-        """
-        <div class="domain-hint-box">
-            💡 <b>School Domain Auto-Complete:</b><br/>
-            Type <code>30 (your school email)</code> without <code>@simsburyschools.net</code>.<br/>
-            Include an <code>@</code> (e.g. <code>user@gmail.com</code>) to use a different email address.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    
-    with st.form("auth_modal_form"):
+    with col_input:
         raw_email_input = st.text_input(
             "Username or Full Email",
             key="auth_modal_email",
-            placeholder="@simsburyschools.net"
+            placeholder="e.g. 30guptaa"
         )
-        password = st.text_input("Password", type="password", key="auth_modal_pw")
-        submitted = st.form_submit_button(mode)
         
-        if submitted:
-            email_val = raw_email_input.strip()
-            
-            # Auto-append default school domain if no '@' symbol was entered
-            if email_val and "@" not in email_val:
-                email_val = f"{email_val}{DEFAULT_DOMAIN}"
-                
-            password_val = password.strip()
-            
-            if mode == "Sign Up":
-                res = sign_up(email_val, password_val)
-                if res.get("error"):
-                    st.error(f"Sign up failed: {res.get('error')}")
-                else:
-                    st.success(f"Sign up successful for {email_val}! You can now sign in.")
+    typed_user = raw_email_input.strip()
+    has_custom_domain = "@" in typed_user
+
+    with col_badge:
+        if has_custom_domain:
+            st.markdown('<div class="domain-badge-active custom-domain">@custom</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="domain-badge-active">{DEFAULT_DOMAIN}</div>', unsafe_allow_html=True)
+
+    # Real-Time Email Preview Box
+    if typed_user:
+        resolved_email = typed_user if has_custom_domain else f"{typed_user}{DEFAULT_DOMAIN}"
+        st.markdown(
+            f'<div class="live-email-preview">📧 Full Account Email: <b>{resolved_email}</b></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f'<div class="live-email-preview muted">📧 Full Account Email: <i>username{DEFAULT_DOMAIN}</i></div>',
+            unsafe_allow_html=True,
+        )
+
+    password = st.text_input("Password", type="password", key="auth_modal_pw")
+
+    if st.button(mode, key="auth_modal_submit_btn"):
+        email_val = typed_user
+        if email_val and "@" not in email_val:
+            email_val = f"{email_val}{DEFAULT_DOMAIN}"
+
+        password_val = password.strip()
+
+        if not email_val or not password_val:
+            st.error("Please enter both a username/email and a password.")
+        elif mode == "Sign Up":
+            res = sign_up(email_val, password_val)
+            if res.get("error"):
+                st.error(f"Sign up failed: {res.get('error')}")
             else:
-                res = sign_in(email_val, password_val)
-                err = res.get("error")
-                data = res.get("data") if isinstance(res, dict) else getattr(res, "data", None)
-                user_obj = extract_user_from_auth_response(res)
-                if not user_obj and isinstance(data, dict):
-                    user_obj = data.get("user") or (data.get("session") or {}).get("user")
-                
-                if err:
-                    st.error(f"Sign in failed: {err}")
-                elif not user_obj:
-                    # Fallback user if local mode without Supabase connection
-                    st.session_state.user = {"id": "local_user_123", "email": email_val}
-                    safe_rerun()
-                else:
-                    st.session_state.user = user_obj
-                    if not _read_courses_file():
-                        st.session_state["_show_welcome_courses_modal"] = True
-                    safe_rerun()
+                st.success(f"Sign up successful for {email_val}! You can now sign in.")
+        else:
+            res = sign_in(email_val, password_val)
+            err = res.get("error")
+            data = res.get("data") if isinstance(res, dict) else getattr(res, "data", None)
+            user_obj = extract_user_from_auth_response(res)
+            if not user_obj and isinstance(data, dict):
+                user_obj = data.get("user") or (data.get("session") or {}).get("user")
+
+            if err:
+                st.error(f"Sign in failed: {err}")
+            elif not user_obj:
+                # Fallback user if local mode without Supabase connection
+                st.session_state.user = {"id": "local_user_123", "email": email_val}
+                safe_rerun()
+            else:
+                st.session_state.user = user_obj
+                if not _read_courses_file():
+                    st.session_state["_show_welcome_courses_modal"] = True
+                safe_rerun()
 
 
 # -----------------------
