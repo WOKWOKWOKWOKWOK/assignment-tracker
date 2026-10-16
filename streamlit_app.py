@@ -1,11 +1,11 @@
 """
-Assignment Tracker — Full-Width Dark Theme (No Text Clipping)
+Assignment Tracker — Full-Width Dark Theme with Smart School Domain Auto-Complete
 
 Updates:
-- Fixed top header button column ratios to eliminate text clipping on 'Clear Completed' and 'Add Assignment'
-- Added explicit .stButton > button CSS overrides to force zero truncation
+- Full unclipped email pill display in top header bar
+- Smart email domain auto-completion (defaults to @simsburyschools.net if no '@' is typed)
 - Completely hidden sidebar for 100% full-width layout
-- Preserved 100% Supabase Auth, smart checkbox toggle restoration, and persistence logic
+- Preserved 100% Supabase Auth, smart status restoration, and persistence logic
 """
 
 from __future__ import annotations
@@ -54,6 +54,7 @@ else:
 # -----------------------
 DATA_FILE = Path("data.json")
 COURSES_FILE = Path("courses.json")
+DEFAULT_DOMAIN = "@simsburyschools.net"
 
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"]
@@ -507,19 +508,21 @@ st.markdown(
         margin-top: 4px;
     }
 
-    /* Status Pill Engine */
+    /* Unclipped User Email Pill */
     .status-engine-pill {
         background-color: #0f172a;
         border: 1px solid #1e293b;
         border-radius: 20px;
         padding: 6px 14px;
-        font-size: 0.8rem;
+        font-size: 0.82rem;
         color: #94a3b8;
         display: inline-flex;
         align-items: center;
         gap: 6px;
         font-weight: 500;
         white-space: nowrap !important;
+        overflow: visible !important;
+        width: max-content !important;
     }
 
     .green-dot {
@@ -756,12 +759,17 @@ def show_auth_dialog():
     mode = st.radio("Choose Action", ["Sign In", "Sign Up"], horizontal=True, key="auth_modal_mode")
     
     with st.form("auth_modal_form"):
-        email = st.text_input("Email", key="auth_modal_email")
+        raw_email_input = st.text_input("Username or Email", key="auth_modal_email", help="Type '30guptaa' (auto-adds @simsburyschools.net) or your full email.")
         password = st.text_input("Password", type="password", key="auth_modal_pw")
         submitted = st.form_submit_button(mode)
         
         if submitted:
-            email_val = email.strip()
+            email_val = raw_email_input.strip()
+            
+            # Auto-append default school domain if no '@' symbol was entered
+            if email_val and "@" not in email_val:
+                email_val = f"{email_val}{DEFAULT_DOMAIN}"
+                
             password_val = password.strip()
             
             if mode == "Sign Up":
@@ -990,9 +998,9 @@ if st.session_state.get("_open_manage_courses", False):
     show_manage_courses_dialog()
 
 # -----------------------
-# Top Header Bar (Full Width & Balanced Ratios)
+# Top Header Bar (Full Width & Unclipped Email Display)
 # -----------------------
-col_header_left, col_header_right = st.columns([1.2, 3.8])
+col_header_left, col_header_right = st.columns([1.0, 4.0])
 
 with col_header_left:
     st.markdown(
@@ -1006,7 +1014,7 @@ with col_header_left:
     )
 
 with col_header_right:
-    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.35, 1.35, 1.35, 1.0, 1.4])
+    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.2, 1.2, 1.3, 0.9, 2.2])
     with btn_col1:
         if st.button("🧹 Clear Completed", key="toolbar_clear"):
             rows = _read_data_file()
@@ -1026,7 +1034,7 @@ with col_header_right:
             sign_out()
     with btn_col5:
         st.markdown(
-            f'<div class="status-engine-pill"><span class="green-dot"></span> {email[:18]}...</div>',
+            f'<div class="status-engine-pill"><span class="green-dot"></span> {email}</div>',
             unsafe_allow_html=True,
         )
 
