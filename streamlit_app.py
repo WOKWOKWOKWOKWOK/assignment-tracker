@@ -1,10 +1,10 @@
 """
-Assignment Tracker — Full-Width Dark Theme (No Sidebar)
+Assignment Tracker — Full-Width Dark Theme (No Text Clipping)
 
 Updates:
-- Removed sidebar completely to give 100% width canvas for Chromebook screens
-- Placed Sign Out button & email pill into top header bar
-- Modal popup dialog for Sign In / Sign Up
+- Fixed top header button column ratios to eliminate text clipping on 'Clear Completed' and 'Add Assignment'
+- Added explicit .stButton > button CSS overrides to force zero truncation
+- Completely hidden sidebar for 100% full-width layout
 - Preserved 100% Supabase Auth, smart checkbox toggle restoration, and persistence logic
 """
 
@@ -452,7 +452,7 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS Styling (Completely Removes Sidebar & Handles Responsive Grid)
+# CSS Styling
 # -----------------------
 st.markdown(
     """
@@ -481,7 +481,7 @@ st.markdown(
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-wrap: wrap !important;
-        gap: 16px !important;
+        gap: 12px !important;
     }
 
     div[data-testid="column"] {
@@ -507,20 +507,6 @@ st.markdown(
         margin-top: 4px;
     }
 
-    /* User Email Pill */
-    .user-email-pill {
-        background-color: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 20px;
-        padding: 5px 12px;
-        font-size: 0.78rem;
-        color: #93c5fd;
-        font-weight: 600;
-        display: inline-flex;
-        align-items: center;
-        white-space: nowrap !important;
-    }
-
     /* Status Pill Engine */
     .status-engine-pill {
         background-color: #0f172a;
@@ -544,16 +530,22 @@ st.markdown(
         display: inline-block;
     }
 
-    /* Top Action Buttons */
+    /* Force All Streamlit Buttons To Display Unclipped Text */
+    .stButton > button {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        font-size: 0.82rem !important;
+        padding: 5px 10px !important;
+        width: 100% !important;
+    }
+
     button[key="toolbar_clear"] {
         background-color: #064e3b !important;
         color: #34d399 !important;
         border: 1px solid #059669 !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
-        white-space: nowrap !important;
-        min-width: max-content !important;
-        padding: 6px 12px !important;
     }
 
     button[key="toolbar_add"] {
@@ -562,9 +554,6 @@ st.markdown(
         border: none !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
-        white-space: nowrap !important;
-        min-width: max-content !important;
-        padding: 6px 12px !important;
     }
 
     button[key="toolbar_courses"] {
@@ -573,9 +562,6 @@ st.markdown(
         border: 1px solid #312e81 !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
-        white-space: nowrap !important;
-        min-width: max-content !important;
-        padding: 6px 12px !important;
     }
 
     button[key="toolbar_signout"] {
@@ -584,9 +570,6 @@ st.markdown(
         border: 1px solid #9f1239 !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
-        white-space: nowrap !important;
-        min-width: max-content !important;
-        padding: 6px 12px !important;
     }
 
     /* Calendar Banner Box */
@@ -621,9 +604,7 @@ st.markdown(
         border: 1px solid #334155 !important;
         color: #cbd5e1 !important;
         border-radius: 6px !important;
-        white-space: nowrap !important;
         min-width: 58px !important;
-        width: 100% !important;
     }
 
     /* Circular Completion Checkbox */
@@ -1009,9 +990,9 @@ if st.session_state.get("_open_manage_courses", False):
     show_manage_courses_dialog()
 
 # -----------------------
-# Top Header Bar (Full Width)
+# Top Header Bar (Full Width & Balanced Ratios)
 # -----------------------
-col_header_left, col_header_right = st.columns([1.8, 3.2])
+col_header_left, col_header_right = st.columns([1.2, 3.8])
 
 with col_header_left:
     st.markdown(
@@ -1025,7 +1006,7 @@ with col_header_left:
     )
 
 with col_header_right:
-    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.1, 1.2, 1.3, 1.0, 1.4])
+    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.35, 1.35, 1.35, 1.0, 1.4])
     with btn_col1:
         if st.button("🧹 Clear Completed", key="toolbar_clear"):
             rows = _read_data_file()
@@ -1068,7 +1049,7 @@ with col_sort:
     sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="main_sort")
 
 # -----------------------
-# Assignment Cards Grid (Auto-flex Grid)
+# Assignment Cards Grid
 # -----------------------
 if "df_cached" not in st.session_state:
     st.session_state.df_cached = fetch_assignments(user_id)
