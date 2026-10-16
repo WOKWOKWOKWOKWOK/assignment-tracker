@@ -1107,7 +1107,7 @@ with col_header_right:
 # -----------------------
 today_str = datetime.today().strftime("%A, %B %d, %Y")
 st.markdown(
-    f'<div class="calendar-banner-box">📅 Today\'s Matrix Operations Calendar: {today_str}</div>',
+    f'<div class="calendar-banner-box">📅 Today\'s Date: {today_str}</div>',
     unsafe_allow_html=True,
 )
 
@@ -1118,7 +1118,7 @@ col_search, col_sort = st.columns([3, 1.5])
 with col_search:
     search_q = st.text_input("Search tasks or subjects...", key="main_search", label_visibility="collapsed", placeholder="Search tasks or subjects...")
 with col_sort:
-    sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="main_sort")
+    sort_by = st.selectbox("Sort By:", SORT_OPTIONS, index=0, key="main_sort")
 
 # -----------------------
 # Assignment Cards Grid
@@ -1137,7 +1137,7 @@ if search_q:
 df = sort_df(df, sort_by)
 
 if df.empty:
-    st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found — your matrix is clear.</div>", unsafe_allow_html=True)
+    st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found, it is clear.</div>", unsafe_allow_html=True)
 else:
     cards_per_row = 3
     chunked_rows = [df.iloc[i:i + cards_per_row] for i in range(0, len(df), cards_per_row)]
