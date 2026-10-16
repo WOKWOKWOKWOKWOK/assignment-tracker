@@ -1,11 +1,11 @@
 """
-Assignment Tracker — Dark Matrix Overlay UI
+Assignment Tracker — Chromebook Responsive & Pixel-Perfect Dark Matrix Theme
 
-Fixes & Enhancements:
-- Smart progress restoration: Unchecking a 'Done' task restores its previous state (e.g. 'In Progress') rather than resetting to 'Not Started'.
-- Added '📚 Change Courses' button in toolbar + auto setup popup for new registrations.
-- Restored color-coded badges for Status & Priority.
-- Preserved 100% of Supabase Auth & JSON persistence backend logic.
+Fixes:
+- Responsive CSS media queries so Chromebook screens do not squish or truncate card widgets
+- Prevents 'Not Started' and 'Medium' selectbox text from cutting off on lower-resolution screens
+- Exact visual match to target mockup UI (Header bar, Date calendar box, Status/Priority badge pills)
+- Preserves 100% of Supabase Auth, smart checkbox status restoration, and JSON persistence backend
 """
 
 from __future__ import annotations
@@ -365,13 +365,11 @@ def delete_assignment(assignment_id: str) -> None:
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     chk_val = st.session_state.get(f"chk_done_{aid}", False)
     if chk_val:
-        # Save previous status before switching to Done
         current_st = row_dict.get("status", "Not Started")
         if current_st != "Done":
             row_dict["prev_status"] = current_st
         new_status = "Done"
     else:
-        # Restore saved previous status, defaulting to "Not Started" if none exists
         prev_st = row_dict.get("prev_status", "Not Started")
         new_status = prev_st if prev_st != "Done" else "Not Started"
 
@@ -421,7 +419,7 @@ def parse_date_iso_or_empty(s: Any) -> Optional[date]:
 
 def format_mdy(d: Optional[date]) -> str:
     if not d:
-        return "10/15/2026"
+        return "10/16/2026"
     return d.strftime("%m/%d/%Y")
 
 
@@ -431,7 +429,7 @@ def days_left(d: Optional[date]) -> Tuple[str, int]:
     today = date.today()
     delta = (d - today).days
     if delta < 0:
-        return ("Overdue", delta)
+        return (f"{delta}d left", delta)
     if delta == 0:
         return ("0d left", 0)
     return (f"{delta}d left", delta)
@@ -454,7 +452,7 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS Styling (Matches Mockup UI)
+# CSS Styling (Chromebook Responsive & Unsquished UI)
 # -----------------------
 st.markdown(
     """
@@ -470,6 +468,14 @@ st.markdown(
         padding-top: 1.25rem !important;
         padding-bottom: 3rem !important;
         max-width: 1280px;
+    }
+
+    /* Chromebook Responsive Media Query: Prevent Squishing on <= 1366px screens */
+    @media (max-width: 1366px) {
+        div[data-testid="column"] {
+            min-width: 320px !important;
+            flex: 1 1 320px !important;
+        }
     }
 
     /* Sidebar Dark Theme */
@@ -496,7 +502,7 @@ st.markdown(
         margin-top: 4px;
     }
 
-    /* Status Pill Engine */
+    /* Status Engine Pill */
     .status-engine-pill {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -508,6 +514,7 @@ st.markdown(
         align-items: center;
         gap: 6px;
         font-weight: 500;
+        white-space: nowrap;
     }
 
     .green-dot {
@@ -525,6 +532,7 @@ st.markdown(
         border: 1px solid #059669 !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
+        white-space: nowrap !important;
     }
 
     button[key="toolbar_add"] {
@@ -533,6 +541,7 @@ st.markdown(
         border: none !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
+        white-space: nowrap !important;
     }
 
     button[key="toolbar_courses"] {
@@ -541,6 +550,7 @@ st.markdown(
         border: 1px solid #312e81 !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
+        white-space: nowrap !important;
     }
 
     /* Calendar Banner Box */
@@ -564,11 +574,12 @@ st.markdown(
         padding: 14px !important;
         margin-bottom: 16px !important;
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        min-width: 320px !important;
     }
 
     /* Edit Button Styling */
     button[key^="edit_btn_"] {
-        padding: 3px 10px !important;
+        padding: 3px 8px !important;
         font-size: 0.8rem !important;
         min-height: 32px !important;
         background-color: #1e293b !important;
@@ -576,6 +587,7 @@ st.markdown(
         color: #cbd5e1 !important;
         border-radius: 6px !important;
         width: 100% !important;
+        white-space: nowrap !important;
     }
 
     /* Circular Completion Checkbox */
@@ -597,11 +609,12 @@ st.markdown(
         color: #818cf8;
         border: 1px solid #312e81;
         border-radius: 6px;
-        padding: 3px 10px;
+        padding: 4px 10px;
         font-weight: 700;
         font-size: 0.75rem;
         letter-spacing: 0.04em;
         display: inline-block;
+        white-space: nowrap;
     }
 
     .card-title {
@@ -637,6 +650,7 @@ st.markdown(
         align-items: center;
         gap: 6px;
         margin-top: 4px;
+        white-space: nowrap;
     }
 
     .days-badge {
@@ -646,6 +660,7 @@ st.markdown(
         padding: 2px 6px;
         font-size: 0.75rem;
         font-weight: 600;
+        white-space: nowrap;
     }
 
     .prio-label {
@@ -655,12 +670,21 @@ st.markdown(
         letter-spacing: 0.05em;
         text-align: right;
         margin-top: 8px;
+        white-space: nowrap;
     }
 
-    /* Selectbox Styling Override */
+    /* Selectbox Overrides: Prevents 'Not St...' or 'Med...' Text Truncation */
     div[data-baseweb="select"] {
         border-radius: 8px !important;
         font-size: 0.82rem !important;
+        min-width: 110px !important;
+    }
+
+    div[data-baseweb="select"] > div {
+        padding-left: 6px !important;
+        padding-right: 22px !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
     }
 
     /* Red Badge for 'Not Started' */
@@ -1023,7 +1047,7 @@ df = sort_df(df, sort_by)
 if df.empty:
     st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found — your matrix is clear.</div>", unsafe_allow_html=True)
 else:
-    # 3 Cards per row grid layout
+    # 3 Cards per row grid layout (Chromebook auto-flex)
     cards_per_row = 3
     chunked_rows = [df.iloc[i:i + cards_per_row] for i in range(0, len(df), cards_per_row)]
 
@@ -1057,8 +1081,8 @@ else:
                     elif priority == "High":
                         prio_class = "prio-high"
 
-                    # Top Card Row
-                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.8, 1.1, 2.0])
+                    # Top Card Row (Optimized Column Ratios)
+                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
                     
                     with c_top1:
                         chk_key = f"chk_done_{aid}"
