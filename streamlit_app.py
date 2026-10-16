@@ -773,7 +773,7 @@ def show_auth_dialog():
         """
         <div class="domain-hint-box">
             💡 <b>School Domain Auto-Complete:</b><br/>
-            Type <code>30guptaa</code> → automatically resolves to <code>30guptaa@simsburyschools.net</code>.<br/>
+            Type <code>30</code> school email without <code>@simsburyschools.net</code>.<br/>
             Include an <code>@</code> (e.g. <code>user@gmail.com</code>) to use a different email address.
         </div>
         """,
@@ -784,7 +784,7 @@ def show_auth_dialog():
         raw_email_input = st.text_input(
             "Username or Full Email",
             key="auth_modal_email",
-            placeholder="30guptaa  (@simsburyschools.net appended automatically)"
+            placeholder="@simsburyschools.net"
         )
         password = st.text_input("Password", type="password", key="auth_modal_pw")
         submitted = st.form_submit_button(mode)
