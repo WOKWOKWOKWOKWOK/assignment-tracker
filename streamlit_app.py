@@ -773,7 +773,7 @@ def show_auth_dialog():
         """
         <div class="domain-hint-box">
             💡 <b>School Domain Auto-Complete:</b><br/>
-            Type <code>30 (your school email)</code> without <code>@simsburyschools.net</code>.<br/>
+            Type <code>30 (your school email)</code> without <code>        @simsburyschools.net</code>.<br/>
             Include an <code>@</code> (e.g. <code>user@gmail.com</code>) to use a different email address.
         </div>
         """,
