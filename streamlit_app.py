@@ -1,11 +1,11 @@
 """
-Assignment Tracker — Auto-Sizing Responsive Theme with Popup Auth
+Assignment Tracker — Full-Width Dark Theme (No Sidebar)
 
-Fixes:
-- Replaced sidebar login with a dedicated Sign In / Sign Up popup modal dialog
-- Added automatic device viewport sizing (Flexbox Grid) so Chromebook screens auto-adjust card counts without squishing
-- Fixed text clipping on header buttons ('Clear Completed', 'Add Assignment') and card widgets ('✏️ Edit', 'Not Started', 'Medium')
-- Preserved 100% of Supabase Auth, smart status toggle restoration, and persistence backend
+Updates:
+- Removed sidebar completely to give 100% width canvas for Chromebook screens
+- Placed Sign Out button & email pill into top header bar
+- Modal popup dialog for Sign In / Sign Up
+- Preserved 100% Supabase Auth, smart checkbox toggle restoration, and persistence logic
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ SORT_OPTIONS = [
     "Created (Newest)",
 ]
 
-st.set_page_config(page_title="Assignment Tracker", page_icon="📋", layout="wide")
+st.set_page_config(page_title="Assignment Tracker", page_icon="📋", layout="wide", initial_sidebar_state="collapsed")
 
 # -----------------------
 # Utility helpers
@@ -452,7 +452,7 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS Styling (Auto Device Sizing & Responsive Flexbox)
+# CSS Styling (Completely Removes Sidebar & Handles Responsive Grid)
 # -----------------------
 st.markdown(
     """
@@ -467,26 +467,26 @@ st.markdown(
     .main .block-container {
         padding-top: 1.25rem !important;
         padding-bottom: 3rem !important;
-        max-width: 1400px;
+        max-width: 1440px;
     }
 
-    /* Chromebook & Laptop Responsiveness: Auto-flex card layout without squishing */
+    /* Completely Hide Streamlit Sidebar & Sidebar Toggle Button */
+    section[data-testid="stSidebar"],
+    div[data-testid="collapsedControl"],
+    button[data-testid="stSidebarCollapseButton"] {
+        display: none !important;
+    }
+
+    /* Auto-flex Grid Layout across all screens */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-wrap: wrap !important;
         gap: 16px !important;
     }
 
-    /* Auto-size card columns based on device screen width */
     div[data-testid="column"] {
         min-width: 330px !important;
         flex: 1 1 330px !important;
-    }
-
-    /* Sidebar Dark Theme */
-    .stSidebar > div:first-child {
-        background-color: #0d121f !important;
-        border-right: 1px solid #1e293b;
     }
 
     /* Header Title Styling */
@@ -505,6 +505,20 @@ st.markdown(
         font-size: 0.88rem;
         color: #64748b;
         margin-top: 4px;
+    }
+
+    /* User Email Pill */
+    .user-email-pill {
+        background-color: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 20px;
+        padding: 5px 12px;
+        font-size: 0.78rem;
+        color: #93c5fd;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        white-space: nowrap !important;
     }
 
     /* Status Pill Engine */
@@ -530,7 +544,7 @@ st.markdown(
         display: inline-block;
     }
 
-    /* Prevent Top Header Buttons from Clipping on Chromebooks */
+    /* Top Action Buttons */
     button[key="toolbar_clear"] {
         background-color: #064e3b !important;
         color: #34d399 !important;
@@ -564,6 +578,17 @@ st.markdown(
         padding: 6px 12px !important;
     }
 
+    button[key="toolbar_signout"] {
+        background-color: #450a0a !important;
+        color: #fca5a5 !important;
+        border: 1px solid #9f1239 !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        white-space: nowrap !important;
+        min-width: max-content !important;
+        padding: 6px 12px !important;
+    }
+
     /* Calendar Banner Box */
     .calendar-banner-box {
         background-color: #0f172a;
@@ -587,7 +612,7 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
-    /* Edit Button Styling inside Card (Fixes '✏️ E...' truncation) */
+    /* Edit Button Styling inside Card */
     button[key^="edit_btn_"] {
         padding: 2px 8px !important;
         font-size: 0.8rem !important;
@@ -684,7 +709,7 @@ st.markdown(
         white-space: nowrap !important;
     }
 
-    /* Selectbox Styling: Prevents 'Not St...' and 'Med...' clipping */
+    /* Selectbox Overrides */
     div[data-baseweb="select"] {
         border-radius: 8px !important;
         font-size: 0.82rem !important;
@@ -786,7 +811,7 @@ def show_auth_dialog():
 
 
 # -----------------------
-# Other Dialog Modals
+# Dialog Modals
 # -----------------------
 @dialog_decorator("Welcome! Setup Your Classes")
 def show_welcome_courses_dialog():
@@ -951,20 +976,11 @@ def show_manage_courses_dialog():
 user = current_user()
 
 if not user:
-    # Trigger Auth Modal popup when signed out
     show_auth_dialog()
-    st.sidebar.info("Please sign in or sign up using the popup window.")
-    if st.sidebar.button("🔑 Open Sign In Dialog"):
-        show_auth_dialog()
     st.stop()
 
 user_id = user.get("id") or user.get("sub") or user.get("user_id")
 email = user.get("email") or (user.get("user_metadata") or {}).get("email") or "Logged In"
-
-# Clean Sidebar Display
-st.sidebar.write(f"Signed in as:\n**{email}**")
-if st.sidebar.button("Sign out", key="sidebar_signout"):
-    sign_out()
 
 # Auto-trigger class setup popup if user has no saved courses
 if not _read_courses_file() and "_show_welcome_courses_modal" not in st.session_state:
@@ -993,9 +1009,9 @@ if st.session_state.get("_open_manage_courses", False):
     show_manage_courses_dialog()
 
 # -----------------------
-# Top Header Bar
+# Top Header Bar (Full Width)
 # -----------------------
-col_header_left, col_header_right = st.columns([2.0, 2.5])
+col_header_left, col_header_right = st.columns([1.8, 3.2])
 
 with col_header_left:
     st.markdown(
@@ -1009,7 +1025,7 @@ with col_header_left:
     )
 
 with col_header_right:
-    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1.2, 1.3, 1.4, 1.5])
+    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.1, 1.2, 1.3, 1.0, 1.4])
     with btn_col1:
         if st.button("🧹 Clear Completed", key="toolbar_clear"):
             rows = _read_data_file()
@@ -1025,8 +1041,11 @@ with col_header_right:
             st.session_state["_open_manage_courses"] = True
             safe_rerun()
     with btn_col4:
+        if st.button("🚪 Sign Out", key="toolbar_signout"):
+            sign_out()
+    with btn_col5:
         st.markdown(
-            '<div class="status-engine-pill"><span class="green-dot"></span> Secure Link Engine</div>',
+            f'<div class="status-engine-pill"><span class="green-dot"></span> {email[:18]}...</div>',
             unsafe_allow_html=True,
         )
 
@@ -1067,7 +1086,6 @@ df = sort_df(df, sort_by)
 if df.empty:
     st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found — your matrix is clear.</div>", unsafe_allow_html=True)
 else:
-    # Dynamic Auto-Flex Cards Layout
     cards_per_row = 3
     chunked_rows = [df.iloc[i:i + cards_per_row] for i in range(0, len(df), cards_per_row)]
 
