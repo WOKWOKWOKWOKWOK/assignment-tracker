@@ -958,7 +958,7 @@ with col_header_left:
         """
         <div>
             <div class="app-title">📋 Assignment Tracker 📝</div>
-            <div class="app-subtitle">Live application syncing instantly with your spreadsheet tracker system.</div>
+            <div class="app-subtitle">Live application syncing instantly with your spreadsheet tracker system. Best Google Sheets Overlay!</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -991,7 +991,7 @@ with col_header_right:
 # -----------------------
 today_str = datetime.today().strftime("%A, %B %d, %Y")
 st.markdown(
-    f'<div class="calendar-banner-box">📅 Today\'s Date: {today_str}</div>',
+    f'<div class="calendar-banner-box">📅 Today\'s Matrix Operations Calendar: {today_str}</div>',
     unsafe_allow_html=True,
 )
 
@@ -1002,7 +1002,7 @@ col_search, col_sort = st.columns([3, 1.5])
 with col_search:
     search_q = st.text_input("Search tasks or subjects...", key="main_search", label_visibility="collapsed", placeholder="Search tasks or subjects...")
 with col_sort:
-    sort_by = st.selectbox("Sort By:", SORT_OPTIONS, index=0, key="main_sort")
+    sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="main_sort")
 
 # -----------------------
 # Assignment Cards Grid
@@ -1021,7 +1021,7 @@ if search_q:
 df = sort_df(df, sort_by)
 
 if df.empty:
-    st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found — your done with your assignments.</div>", unsafe_allow_html=True)
+    st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found — your matrix is clear.</div>", unsafe_allow_html=True)
 else:
     # 3 Cards per row grid layout
     cards_per_row = 3
