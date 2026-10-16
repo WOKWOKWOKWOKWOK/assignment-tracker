@@ -1018,7 +1018,7 @@ with col_header_left:
         """
         <div>
             <div class="app-title">📋 Assignment Tracker 📝</div>
-            <div class="app-subtitle">Live application syncing instantly with your spreadsheet tracker system. Best Google Sheets Overlay!</div>
+            <div class="app-subtitle">Your Assginment Tracker.</div>
         </div>
         """,
         unsafe_allow_html=True,
