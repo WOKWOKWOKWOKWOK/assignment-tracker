@@ -1,11 +1,11 @@
 """
-Assignment Tracker — Full-Width Dark Theme with Smart School Domain Auto-Complete
+Assignment Tracker — Full-Width Dark Theme with Visible School Domain Auto-Complete
 
 Updates:
-- Full unclipped email pill display in top header bar
-- Smart email domain auto-completion (defaults to @simsburyschools.net if no '@' is typed)
-- Completely hidden sidebar for 100% full-width layout
-- Preserved 100% Supabase Auth, smart status restoration, and persistence logic
+- Prominent visual display for @simsburyschools.net default domain in Sign In / Sign Up popup modal
+- Automatically appends @simsburyschools.net unless an '@' symbol is typed in the email field
+- Full unclipped user email badge & action buttons in the top header
+- 100% sidebar-free layout with full device responsiveness and Supabase/JSON fallback persistence
 """
 
 from __future__ import annotations
@@ -533,6 +533,17 @@ st.markdown(
         display: inline-block;
     }
 
+    /* Domain Suffix Helper Text inside Auth Modal */
+    .domain-hint-box {
+        background-color: #1e1b4b;
+        border: 1px solid #312e81;
+        color: #a5b4fc;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 0.82rem;
+        margin-bottom: 12px;
+    }
+
     /* Force All Streamlit Buttons To Display Unclipped Text */
     .stButton > button {
         white-space: nowrap !important;
@@ -758,8 +769,23 @@ def show_auth_dialog():
     st.markdown("### 🔒 Account Authentication")
     mode = st.radio("Choose Action", ["Sign In", "Sign Up"], horizontal=True, key="auth_modal_mode")
     
+    st.markdown(
+        """
+        <div class="domain-hint-box">
+            💡 <b>School Domain Auto-Complete:</b><br/>
+            Type <code>30guptaa</code> → automatically resolves to <code>30guptaa@simsburyschools.net</code>.<br/>
+            Include an <code>@</code> (e.g. <code>user@gmail.com</code>) to use a different email address.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    
     with st.form("auth_modal_form"):
-        raw_email_input = st.text_input("Username or Email", key="auth_modal_email", help="Type '30guptaa' (auto-adds @simsburyschools.net) or your full email.")
+        raw_email_input = st.text_input(
+            "Username or Full Email",
+            key="auth_modal_email",
+            placeholder="30guptaa  (@simsburyschools.net appended automatically)"
+        )
         password = st.text_input("Password", type="password", key="auth_modal_pw")
         submitted = st.form_submit_button(mode)
         
@@ -777,7 +803,7 @@ def show_auth_dialog():
                 if res.get("error"):
                     st.error(f"Sign up failed: {res.get('error')}")
                 else:
-                    st.success("Sign up successful! You can now sign in.")
+                    st.success(f"Sign up successful for {email_val}! You can now sign in.")
             else:
                 res = sign_in(email_val, password_val)
                 err = res.get("error")
