@@ -520,12 +520,16 @@ def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     current_st = row_dict.get("status", "Not Started")
     
     if chk_val:
+        # If checking it as done, save current status as previous (unless it's already done)
         if current_st != "Done":
             row_dict["prev_status"] = current_st
         new_status = "Done"
     else:
+        # If unchecking, restore the previous status. If prev_status was also Done, fallback to In Progress or Not Started
         prev_st = row_dict.get("prev_status", "Not Started")
-        new_status = prev_st if prev_st and prev_st != "Done" else "Not Started"
+        if prev_st == "Done" or not prev_st:
+            prev_st = "In Progress"
+        new_status = prev_st
 
     row_dict["status"] = new_status
     st.session_state[f"status_sel_{aid}"] = new_status
@@ -1072,7 +1076,7 @@ def show_add_assignment_dialog(user_id: str):
                 "eta": eta.strip(),
                 "created_at": datetime.utcnow().isoformat(),
                 "notes": notes.strip(),
-                "prev_status": status,
+                "prev_status": status if status != "Done" else "Not Started",
             }
             upsert_assignments([new_row])
             if course_free.strip():
