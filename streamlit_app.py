@@ -403,7 +403,7 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS Styling
+# CSS Styling (Fixed Sidebar Text Contrast)
 # -----------------------
 st.markdown(
     """
@@ -420,10 +420,15 @@ st.markdown(
         max-width: 1250px;
     }
 
+    /* Sidebar Background & Contrast Fix */
     .stSidebar > div:first-child {
         background: #ffffff;
         border-right: 1px solid #e2e8f0;
         box-shadow: 2px 0 10px rgba(0,0,0,0.02);
+    }
+    
+    .stSidebar, .stSidebar label, .stSidebar .stRadio div, .stSidebar p {
+        color: #1e293b !important;
     }
 
     .stButton > button {
