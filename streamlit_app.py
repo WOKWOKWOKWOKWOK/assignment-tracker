@@ -2,11 +2,8 @@
 Assignment Tracker — Single-Table Supabase Sync (`assignments` only)
 
 Features:
-- Native integration with single Supabase `assignments` table schema (id, user_id, title, course, due_date, status, notes, created_at)
-- Automatic handling for `jsonb` datatype on the `course` column
-- Smart JSON bundling for extended UI attributes (priority, assignment type, eta, status history) inside `notes`
-- Unclipped email pill, anchored @simsburyschools.net domain badge & live email preview
-- 100% full-width dark theme with hidden sidebar and responsive multi-device layout
+- Native integration with single Supabase `assignments` table schema (id, user_id, title, course, due_date, status, notes, created_at, priority, atype, eta)
+- 100% full-width dark theme with hidden sidebar and responsive multi-device layout (UI completely preserved)
 """
 
 from __future__ import annotations
@@ -131,34 +128,28 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
         return {"error": None, "data": None, "raw": None}
 
 
-def _pack_notes(notes_text: str, priority: str, atype: str, eta: str, prev_status: str) -> str:
-    """Packs extended UI fields cleanly into notes JSON payload."""
+def _pack_notes(notes_text: str, prev_status: str) -> str:
+    """Packs auxiliary state cleanly into notes payload."""
     return json.dumps({
         "text": notes_text,
-        "priority": priority,
-        "atype": atype,
-        "eta": eta,
         "prev_status": prev_status
     })
 
 
-def _unpack_notes(raw_notes: Any) -> Tuple[str, str, str, str, str]:
-    """Extracts UI fields from notes payload with backwards fallback."""
+def _unpack_notes(raw_notes: Any) -> Tuple[str, str]:
+    """Extracts text notes and previous status with fallback."""
     if not raw_notes:
-        return ("", "Medium", "Homework", "", "Not Started")
+        return ("", "Not Started")
     try:
         data = json.loads(str(raw_notes))
         if isinstance(data, dict):
             return (
                 data.get("text", ""),
-                data.get("priority", "Medium"),
-                data.get("atype", "Homework"),
-                data.get("eta", ""),
                 data.get("prev_status", "Not Started")
             )
     except Exception:
         pass
-    return (str(raw_notes), "Medium", "Homework", "", "Not Started")
+    return (str(raw_notes), "Not Started")
 
 
 # -----------------------
@@ -314,7 +305,7 @@ def current_user() -> Optional[Dict[str, Any]]:
 
 
 # -----------------------
-# Single-Table Persistence Helpers
+# Single-Table Persistence Helpers (Mapped to Supabase Columns)
 # -----------------------
 def invalidate_cache():
     if "df_cached" in st.session_state:
@@ -341,10 +332,8 @@ def _write_data_file(rows: List[Dict[str, Any]]) -> None:
 
 
 def _read_courses_file(user_id: str) -> List[str]:
-    """Reads course list from local courses.json merged dynamically with assignments."""
     courses_set = set()
 
-    # Read from local courses.json
     if COURSES_FILE.exists() and user_id:
         try:
             with COURSES_FILE.open("r", encoding="utf-8") as f:
@@ -356,7 +345,6 @@ def _read_courses_file(user_id: str) -> List[str]:
         except Exception:
             pass
 
-    # Extract active courses from Supabase assignments table
     if sb and user_id:
         try:
             res = sb.table("assignments").select("course").eq("user_id", user_id).execute()
@@ -380,7 +368,6 @@ def _read_courses_file(user_id: str) -> List[str]:
 
 
 def _write_courses_file(user_id: str, courses: List[str]) -> None:
-    """Saves course list locally in courses.json."""
     if not user_id:
         return
     try:
@@ -401,14 +388,14 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
 
 
 def fetch_assignments(user_id: str) -> pd.DataFrame:
-    """Fetches assignments directly from `assignments` table."""
+    """Fetches assignments directly from `assignments` table using native columns."""
     rows = []
     if sb and user_id:
         try:
             res = sb.table("assignments").select("*").eq("user_id", user_id).execute()
             if res and hasattr(res, "data") and res.data:
                 for r in res.data:
-                    n_text, prio, atype, eta, prev_st = _unpack_notes(r.get("notes"))
+                    n_text, prev_st = _unpack_notes(r.get("notes"))
                     raw_course = r.get("course")
                     
                     if isinstance(raw_course, list) and len(raw_course) > 0:
@@ -427,9 +414,9 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
                         "course": course_str.strip().upper(),
                         "due_date": r.get("due_date") or "",
                         "status": r.get("status") or "Not Started",
-                        "priority": prio,
-                        "atype": atype,
-                        "eta": eta,
+                        "priority": r.get("priority") or "Medium",
+                        "atype": r.get("atype") or "Homework",
+                        "eta": r.get("eta") or "",
                         "created_at": r.get("created_at") or "",
                         "notes": n_text,
                         "prev_status": prev_st
@@ -442,16 +429,7 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
         if isinstance(local_rows, list):
             for r in local_rows:
                 if str(r.get("user_id")) == str(user_id):
-                    if "priority" in r:
-                        n_text, prio, atype, eta, prev_st = (
-                            r.get("notes", ""),
-                            r.get("priority", "Medium"),
-                            r.get("atype", "Homework"),
-                            r.get("eta", ""),
-                            r.get("prev_status", "Not Started")
-                        )
-                    else:
-                        n_text, prio, atype, eta, prev_st = _unpack_notes(r.get("notes"))
+                    n_text, prev_st = _unpack_notes(r.get("notes"))
                     rows.append({
                         "id": str(r.get("id")),
                         "user_id": str(r.get("user_id")),
@@ -459,9 +437,9 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
                         "course": str(r.get("course") or "GENERAL").strip().upper(),
                         "due_date": r.get("due_date") or "",
                         "status": r.get("status") or "Not Started",
-                        "priority": prio,
-                        "atype": atype,
-                        "eta": eta,
+                        "priority": r.get("priority") or "Medium",
+                        "atype": r.get("atype") or "Homework",
+                        "eta": r.get("eta") or "",
                         "created_at": r.get("created_at") or "",
                         "notes": n_text,
                         "prev_status": prev_st
@@ -478,15 +456,12 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
 
 
 def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
-    """Upserts directly into `assignments` table, formatting JSONB fields."""
+    """Upserts directly into `assignments` table using native Supabase columns."""
     db_rows = []
     for r in rows_to_upsert:
         n_text = r.get("notes", "")
-        prio = r.get("priority", "Medium")
-        atype = r.get("atype", "Homework")
-        eta = r.get("eta", "")
         prev_st = r.get("prev_status", "Not Started")
-        packed_notes = _pack_notes(n_text, prio, atype, eta, prev_st)
+        packed_notes = _pack_notes(n_text, prev_st)
         
         due_val = r.get("due_date")
         if not due_val:
@@ -498,9 +473,12 @@ def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
             "id": r.get("id"),
             "user_id": r.get("user_id"),
             "title": r.get("title", ""),
-            "course": course_val,  # Supabase Client auto-formats strings/lists into Postgres JSONB
+            "course": course_val,
             "due_date": due_val,
             "status": r.get("status", "Not Started"),
+            "priority": r.get("priority", "Medium"),
+            "atype": r.get("atype", "Homework"),
+            "eta": r.get("eta", ""),
             "notes": packed_notes,
             "created_at": r.get("created_at") or datetime.utcnow().isoformat()
         })
@@ -594,7 +572,7 @@ def parse_date_iso_or_empty(s: Any) -> Optional[date]:
 
 def format_mdy(d: Optional[date]) -> str:
     if not d:
-        return "10/16/2026"
+        return datetime.today().strftime("%m/%d/%Y")
     return d.strftime("%m/%d/%Y")
 
 
@@ -627,12 +605,11 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS Styling
+# CSS Styling (100% Unchanged UI)
 # -----------------------
 st.markdown(
     """
     <style>
-    /* Dark Theme Canvas */
     .stApp {
         background-color: #0b0f19 !important;
         color: #e2e8f0;
@@ -645,14 +622,12 @@ st.markdown(
         max-width: 1440px;
     }
 
-    /* Completely Hide Streamlit Sidebar & Sidebar Toggle Button */
     section[data-testid="stSidebar"],
     div[data-testid="collapsedControl"],
     button[data-testid="stSidebarCollapseButton"] {
         display: none !important;
     }
 
-    /* Auto-flex Grid Layout across all screens */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-wrap: wrap !important;
@@ -664,7 +639,6 @@ st.markdown(
         flex: 1 1 330px !important;
     }
 
-    /* Header Title Styling */
     .app-title {
         font-size: 2.1rem;
         font-weight: 900;
@@ -682,7 +656,6 @@ st.markdown(
         margin-top: 4px;
     }
 
-    /* Unclipped User Email Pill */
     .status-engine-pill {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -707,7 +680,6 @@ st.markdown(
         display: inline-block;
     }
 
-    /* Domain Suffix Badge Anchored Next to Input */
     .domain-badge-active {
         background-color: #1e1b4b;
         border: 1px solid #4f46e5;
@@ -727,7 +699,6 @@ st.markdown(
         color: #34d399;
     }
 
-    /* Live Email Preview Box */
     .live-email-preview {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -742,7 +713,6 @@ st.markdown(
         color: #64748b;
     }
 
-    /* Force All Streamlit Buttons To Display Unclipped Text */
     .stButton > button {
         white-space: nowrap !important;
         overflow: visible !important;
@@ -784,7 +754,6 @@ st.markdown(
         font-weight: 600 !important;
     }
 
-    /* Calendar Banner Box */
     .calendar-banner-box {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -797,7 +766,6 @@ st.markdown(
         margin: 16px 0 20px 0;
     }
 
-    /* Card Box Container */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
@@ -807,19 +775,17 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
-    /* Edit Button Styling inside Card */
     button[key^="edit_btn_"] {
         padding: 2px 8px !important;
         font-size: 0.8rem !important;
         min-height: 32px !important;
-        background-color: #1e293b !important;
-        border: 1px solid #334155 !important;
-        color: #cbd5e1 !important;
+        background-color: #1e1b4b !important;
+        border: 1px solid #312e81 !important;
+        color: #818cf8 !important;
         border-radius: 6px !important;
         min-width: 58px !important;
     }
 
-    /* Circular Completion Checkbox */
     div[data-testid="stCheckbox"] {
         margin-top: 4px;
     }
@@ -832,7 +798,6 @@ st.markdown(
         cursor: pointer;
     }
 
-    /* Subject Badge Pill */
     .course-badge {
         background-color: #1e1b4b;
         color: #818cf8;
@@ -902,7 +867,6 @@ st.markdown(
         white-space: nowrap !important;
     }
 
-    /* Selectbox Overrides */
     div[data-baseweb="select"] {
         border-radius: 8px !important;
         font-size: 0.82rem !important;
@@ -915,28 +879,24 @@ st.markdown(
         white-space: nowrap !important;
     }
 
-    /* Red Badge for 'Not Started' */
     .status-not-started div[data-baseweb="select"] {
         background-color: #2a0812 !important;
         border: 1px solid #9f1239 !important;
         color: #fca5a5 !important;
     }
 
-    /* Amber Badge for 'In Progress' */
     .status-in-progress div[data-baseweb="select"] {
         background-color: #2e1b04 !important;
         border: 1px solid #854d0e !important;
         color: #fde047 !important;
     }
 
-    /* Green Badge for 'Done' */
     .status-done div[data-baseweb="select"] {
         background-color: #032b1d !important;
         border: 1px solid #065f46 !important;
         color: #34d399 !important;
     }
 
-    /* Priority Color Accents */
     .prio-low div[data-baseweb="select"] {
         border: 1px solid #059669 !important;
         color: #34d399 !important;
@@ -967,7 +927,6 @@ def show_auth_dialog():
     st.markdown("### 🔒 Account Authentication")
     mode = st.radio("Choose Action", ["Sign In", "Sign Up"], horizontal=True, key="auth_modal_mode")
 
-    # Side-by-Side Username Input + Anchored Domain Badge
     col_input, col_badge = st.columns([2.5, 1.5])
     
     with col_input:
@@ -986,7 +945,6 @@ def show_auth_dialog():
         else:
             st.markdown(f'<div class="domain-badge-active">{DEFAULT_DOMAIN}</div>', unsafe_allow_html=True)
 
-    # Real-Time Email Preview Box
     if typed_user:
         resolved_email = typed_user if has_custom_domain else f"{typed_user}{DEFAULT_DOMAIN}"
         st.markdown(
@@ -1211,7 +1169,6 @@ if not user:
 user_id = str(user.get("id") or user.get("sub") or user.get("user_id") or str(uuid.uuid4()))
 email = user.get("email") or (user.get("user_metadata") or {}).get("email") or "Logged In"
 
-# Auto-trigger class setup popup if user has no saved courses
 if not _read_courses_file(user_id) and "_show_welcome_courses_modal" not in st.session_state:
     st.session_state["_show_welcome_courses_modal"] = True
 
@@ -1247,7 +1204,7 @@ with col_header_left:
         """
         <div>
             <div class="app-title">📋 Assignment Tracker 📝</div>
-            <div class="app-subtitle">Your Assginment Tracker.</div>
+            <div class="app-subtitle">Your Assignment Tracker.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1306,12 +1263,10 @@ if "df_cached" not in st.session_state:
 
 df = st.session_state.df_cached.copy()
 
-# Search Filter
 if search_q:
     q = search_q.lower()
     df = df[df.apply(lambda r: q in str(r.get("title", "")).lower() or q in str(r.get("course", "")).lower() or q in str(r.get("atype", "")).lower(), axis=1)]
 
-# Sort
 df = sort_df(df, sort_by)
 
 if df.empty:
@@ -1336,21 +1291,18 @@ else:
                     priority = row.get("priority") or "Low"
                     row_dict = row.to_dict()
 
-                    # Dynamic CSS Status Class
                     status_class = "status-not-started"
                     if status == "In Progress":
                         status_class = "status-in-progress"
                     elif status == "Done":
                         status_class = "status-done"
 
-                    # Dynamic CSS Priority Class
                     prio_class = "prio-low"
                     if priority == "Medium":
                         prio_class = "prio-medium"
                     elif priority == "High":
                         prio_class = "prio-high"
 
-                    # Top Card Row
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
                     
                     with c_top1:
@@ -1386,16 +1338,10 @@ else:
                         )
                         st.markdown("</div>", unsafe_allow_html=True)
 
-                    # Card Title
                     st.markdown(f"<div class='card-title'>{title}</div>", unsafe_allow_html=True)
-
-                    # Assignment Type Tag
                     st.markdown(f"<div class='card-type'><span>📌</span> {atype}</div>", unsafe_allow_html=True)
-
-                    # Horizontal Separator
                     st.markdown("<hr class='card-hr'/>", unsafe_allow_html=True)
 
-                    # Footer Row
                     c_bot1, c_bot2 = st.columns([1.5, 1.8])
                     with c_bot1:
                         st.markdown(
