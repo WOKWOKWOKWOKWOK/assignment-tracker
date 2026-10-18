@@ -517,14 +517,15 @@ def delete_assignment(assignment_id: str) -> None:
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     chk_val = st.session_state.get(f"chk_done_{aid}", False)
+    current_st = row_dict.get("status", "Not Started")
+    
     if chk_val:
-        current_st = row_dict.get("status", "Not Started")
         if current_st != "Done":
             row_dict["prev_status"] = current_st
         new_status = "Done"
     else:
         prev_st = row_dict.get("prev_status", "Not Started")
-        new_status = prev_st if prev_st != "Done" else "Not Started"
+        new_status = prev_st if prev_st and prev_st != "Done" else "Not Started"
 
     row_dict["status"] = new_status
     st.session_state[f"status_sel_{aid}"] = new_status
