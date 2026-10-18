@@ -517,17 +517,17 @@ def delete_assignment(assignment_id: str) -> None:
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     chk_val = st.session_state.get(f"chk_done_{aid}", False)
-    current_st = row_dict.get("status", "Not Started")
     
     if chk_val:
-        # If checking it as done, save current status as previous (unless it's already done)
+        # If checking it as done, grab current status as prev_status if it's not already Done
+        current_st = row_dict.get("status", "Not Started")
         if current_st != "Done":
             row_dict["prev_status"] = current_st
         new_status = "Done"
     else:
-        # If unchecking, restore the previous status. If prev_status was also Done, fallback to In Progress or Not Started
+        # If unchecking, restore previous status. If none exists or it was Done, fallback to In Progress
         prev_st = row_dict.get("prev_status", "Not Started")
-        if prev_st == "Done" or not prev_st:
+        if not prev_st or prev_st == "Done":
             prev_st = "In Progress"
         new_status = prev_st
 
@@ -539,6 +539,7 @@ def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
 def on_status_change(aid: str, row_dict: Dict[str, Any]):
     new_status = st.session_state.get(f"status_sel_{aid}")
     if new_status:
+        # Whenever status is changed via selectbox to a non-Done state, update prev_status immediately!
         if new_status != "Done":
             row_dict["prev_status"] = new_status
         row_dict["status"] = new_status
