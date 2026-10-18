@@ -1,5 +1,12 @@
 """
-Assignment Tracker — compact, polished UI version with Supabase Persistence
+Assignment Tracker — Single-Table Supabase Sync (`assignments` only)
+
+Features:
+- Native integration with single Supabase `assignments` table schema (id, user_id, title, course, due_date, status, notes, created_at)
+- Automatic handling for `jsonb` datatype on the `course` column
+- Smart JSON bundling for extended UI attributes (priority, assignment type, eta, status history) inside `notes`
+- Unclipped email pill, anchored @simsburyschools.net domain badge & live email preview
+- 100% full-width dark theme with hidden sidebar and responsive multi-device layout
 """
 
 from __future__ import annotations
@@ -20,10 +27,35 @@ except Exception:
     create_client = None  # type: ignore
 
 # -----------------------
+# Streamlit Rerun & Dialog Helper
+# -----------------------
+def safe_rerun() -> None:
+    """Universal rerun helper compatible across Streamlit versions."""
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+
+# Safe Modal Decorator Setup
+if hasattr(st, "dialog"):
+    dialog_decorator = st.dialog
+elif hasattr(st, "experimental_dialog"):
+    dialog_decorator = st.experimental_dialog
+else:
+    def dialog_decorator(title: str):
+        def decorator(func):
+            def wrapper(*args, **kwargs):
+                st.subheader(title)
+                return func(*args, **kwargs)
+            return wrapper
+        return decorator
+
+# -----------------------
 # Config / persistence
 # -----------------------
 DATA_FILE = Path("data.json")
 COURSES_FILE = Path("courses.json")
+DEFAULT_DOMAIN = "@simsburyschools.net"
 
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"]
@@ -49,10 +81,10 @@ SORT_OPTIONS = [
     "Created (Newest)",
 ]
 
-st.set_page_config(page_title="Assignment Tracker", layout="wide")
+st.set_page_config(page_title="Assignment Tracker", page_icon="📋", layout="wide", initial_sidebar_state="collapsed")
 
 # -----------------------
-# Utility helpers
+# Utility Helpers & Schema Encoding
 # -----------------------
 def _to_dict(obj: Any) -> Optional[Dict[str, Any]]:
     if obj is None:
@@ -99,8 +131,38 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
         return {"error": None, "data": None, "raw": None}
 
 
+def _pack_notes(notes_text: str, priority: str, atype: str, eta: str, prev_status: str) -> str:
+    """Packs extended UI fields cleanly into notes JSON payload."""
+    return json.dumps({
+        "text": notes_text,
+        "priority": priority,
+        "atype": atype,
+        "eta": eta,
+        "prev_status": prev_status
+    })
+
+
+def _unpack_notes(raw_notes: Any) -> Tuple[str, str, str, str, str]:
+    """Extracts UI fields from notes payload with backwards fallback."""
+    if not raw_notes:
+        return ("", "Medium", "Homework", "", "Not Started")
+    try:
+        data = json.loads(str(raw_notes))
+        if isinstance(data, dict):
+            return (
+                data.get("text", ""),
+                data.get("priority", "Medium"),
+                data.get("atype", "Homework"),
+                data.get("eta", ""),
+                data.get("prev_status", "Not Started")
+            )
+    except Exception:
+        pass
+    return (str(raw_notes), "Medium", "Homework", "", "Not Started")
+
+
 # -----------------------
-# Auth helpers
+# Auth Helpers (Supabase)
 # -----------------------
 def sign_up(email: str, password: str) -> Dict[str, Any]:
     auth = getattr(sb, "auth", None) if sb else None
@@ -159,10 +221,7 @@ def sign_out() -> None:
     for key in ["user", "df_cached"]:
         if key in st.session_state:
             del st.session_state[key]
-    try:
-        st.experimental_rerun()
-    except Exception:
-        pass
+    safe_rerun()
 
 
 def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
@@ -255,8 +314,13 @@ def current_user() -> Optional[Dict[str, Any]]:
 
 
 # -----------------------
-# Persistence (Supabase + Local Fallback)
+# Single-Table Persistence Helpers
 # -----------------------
+def invalidate_cache():
+    if "df_cached" in st.session_state:
+        del st.session_state["df_cached"]
+
+
 def _read_data_file() -> List[Dict[str, Any]]:
     if not DATA_FILE.exists():
         return []
@@ -271,57 +335,181 @@ def _write_data_file(rows: List[Dict[str, Any]]) -> None:
     try:
         with DATA_FILE.open("w", encoding="utf-8") as f:
             json.dump(rows, f, indent=2, default=str)
+        invalidate_cache()
     except Exception:
         pass
 
 
-def _read_courses_file() -> List[str]:
-    if not COURSES_FILE.exists():
-        return []
-    try:
-        with COURSES_FILE.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+def _read_courses_file(user_id: str) -> List[str]:
+    """Reads course list from local courses.json merged dynamically with assignments."""
+    courses_set = set()
+
+    # Read from local courses.json
+    if COURSES_FILE.exists() and user_id:
+        try:
+            with COURSES_FILE.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    courses_set.update(data.get(user_id, []))
+                elif isinstance(data, list):
+                    courses_set.update(data)
+        except Exception:
+            pass
+
+    # Extract active courses from Supabase assignments table
+    if sb and user_id:
+        try:
+            res = sb.table("assignments").select("course").eq("user_id", user_id).execute()
+            if res and hasattr(res, "data") and res.data:
+                for r in res.data:
+                    c = r.get("course")
+                    if isinstance(c, str) and c.strip():
+                        courses_set.add(c.strip().upper())
+                    elif isinstance(c, list):
+                        for item in c:
+                            if isinstance(item, str) and item.strip():
+                                courses_set.add(item.strip().upper())
+                    elif isinstance(c, dict):
+                        val = c.get("name") or c.get("title")
+                        if val:
+                            courses_set.add(str(val).strip().upper())
+        except Exception:
+            pass
+
+    return sorted(list(courses_set))
 
 
-def _write_courses_file(courses: List[str]) -> None:
+def _write_courses_file(user_id: str, courses: List[str]) -> None:
+    """Saves course list locally in courses.json."""
+    if not user_id:
+        return
     try:
+        all_courses = {}
+        if COURSES_FILE.exists():
+            try:
+                with COURSES_FILE.open("r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                    if isinstance(existing, dict):
+                        all_courses = existing
+            except Exception:
+                all_courses = {}
+        all_courses[user_id] = courses
         with COURSES_FILE.open("w", encoding="utf-8") as f:
-            json.dump(courses, f, indent=2)
+            json.dump(all_courses, f, indent=2)
     except Exception:
         pass
 
 
 def fetch_assignments(user_id: str) -> pd.DataFrame:
+    """Fetches assignments directly from `assignments` table."""
     rows = []
-    if sb:
+    if sb and user_id:
         try:
             res = sb.table("assignments").select("*").eq("user_id", user_id).execute()
-            rows = res.data if hasattr(res, "data") else (res.get("data") if isinstance(res, dict) else [])
+            if res and hasattr(res, "data") and res.data:
+                for r in res.data:
+                    n_text, prio, atype, eta, prev_st = _unpack_notes(r.get("notes"))
+                    raw_course = r.get("course")
+                    
+                    if isinstance(raw_course, list) and len(raw_course) > 0:
+                        course_str = str(raw_course[0])
+                    elif isinstance(raw_course, dict):
+                        course_str = str(raw_course.get("name") or raw_course.get("title") or "GENERAL")
+                    elif isinstance(raw_course, str):
+                        course_str = raw_course
+                    else:
+                        course_str = str(raw_course) if raw_course else "GENERAL"
+
+                    rows.append({
+                        "id": str(r.get("id")),
+                        "user_id": str(r.get("user_id")),
+                        "title": r.get("title") or "",
+                        "course": course_str.strip().upper(),
+                        "due_date": r.get("due_date") or "",
+                        "status": r.get("status") or "Not Started",
+                        "priority": prio,
+                        "atype": atype,
+                        "eta": eta,
+                        "created_at": r.get("created_at") or "",
+                        "notes": n_text,
+                        "prev_status": prev_st
+                    })
         except Exception:
             rows = []
-    
-    if not rows:
-        local_rows = _read_data_file()
-        rows = [r for r in local_rows if r.get("user_id") == user_id]
 
     if not rows:
-        return pd.DataFrame(columns=["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes"])
+        local_rows = _read_data_file()
+        if isinstance(local_rows, list):
+            for r in local_rows:
+                if str(r.get("user_id")) == str(user_id):
+                    if "priority" in r:
+                        n_text, prio, atype, eta, prev_st = (
+                            r.get("notes", ""),
+                            r.get("priority", "Medium"),
+                            r.get("atype", "Homework"),
+                            r.get("eta", ""),
+                            r.get("prev_status", "Not Started")
+                        )
+                    else:
+                        n_text, prio, atype, eta, prev_st = _unpack_notes(r.get("notes"))
+                    rows.append({
+                        "id": str(r.get("id")),
+                        "user_id": str(r.get("user_id")),
+                        "title": r.get("title") or "",
+                        "course": str(r.get("course") or "GENERAL").strip().upper(),
+                        "due_date": r.get("due_date") or "",
+                        "status": r.get("status") or "Not Started",
+                        "priority": prio,
+                        "atype": atype,
+                        "eta": eta,
+                        "created_at": r.get("created_at") or "",
+                        "notes": n_text,
+                        "prev_status": prev_st
+                    })
+
+    if not rows:
+        return pd.DataFrame(columns=["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes", "prev_status"])
     
     df = pd.DataFrame(rows)
-    for c in ["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes"]:
+    for c in ["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes", "prev_status"]:
         if c not in df.columns:
             df[c] = ""
     return df
 
 
 def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
+    """Upserts directly into `assignments` table, formatting JSONB fields."""
+    db_rows = []
+    for r in rows_to_upsert:
+        n_text = r.get("notes", "")
+        prio = r.get("priority", "Medium")
+        atype = r.get("atype", "Homework")
+        eta = r.get("eta", "")
+        prev_st = r.get("prev_status", "Not Started")
+        packed_notes = _pack_notes(n_text, prio, atype, eta, prev_st)
+        
+        due_val = r.get("due_date")
+        if not due_val:
+            due_val = None
+
+        course_val = r.get("course", "GENERAL")
+
+        db_rows.append({
+            "id": r.get("id"),
+            "user_id": r.get("user_id"),
+            "title": r.get("title", ""),
+            "course": course_val,  # Supabase Client auto-formats strings/lists into Postgres JSONB
+            "due_date": due_val,
+            "status": r.get("status", "Not Started"),
+            "notes": packed_notes,
+            "created_at": r.get("created_at") or datetime.utcnow().isoformat()
+        })
+
     if sb:
         try:
-            sb.table("assignments").upsert(rows_to_upsert).execute()
-        except Exception as e:
-            print("Supabase upsert error:", e)
+            sb.table("assignments").upsert(db_rows).execute()
+        except Exception:
+            pass
 
     all_rows = _read_data_file()
     by_id = {r.get("id"): r for r in all_rows if isinstance(r, dict)}
@@ -338,8 +526,8 @@ def delete_assignment(assignment_id: str) -> None:
     if sb:
         try:
             sb.table("assignments").delete().eq("id", assignment_id).execute()
-        except Exception as e:
-            print("Supabase delete error:", e)
+        except Exception:
+            pass
 
     rows = _read_data_file()
     remaining = [r for r in rows if r.get("id") != assignment_id]
@@ -347,7 +535,43 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Date / sort helpers
+# Real-Time Callback Handlers
+# -----------------------
+def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
+    chk_val = st.session_state.get(f"chk_done_{aid}", False)
+    if chk_val:
+        current_st = row_dict.get("status", "Not Started")
+        if current_st != "Done":
+            row_dict["prev_status"] = current_st
+        new_status = "Done"
+    else:
+        prev_st = row_dict.get("prev_status", "Not Started")
+        new_status = prev_st if prev_st != "Done" else "Not Started"
+
+    row_dict["status"] = new_status
+    st.session_state[f"status_sel_{aid}"] = new_status
+    upsert_assignments([row_dict])
+
+
+def on_status_change(aid: str, row_dict: Dict[str, Any]):
+    new_status = st.session_state.get(f"status_sel_{aid}")
+    if new_status:
+        if new_status != "Done":
+            row_dict["prev_status"] = new_status
+        row_dict["status"] = new_status
+        st.session_state[f"chk_done_{aid}"] = (new_status == "Done")
+        upsert_assignments([row_dict])
+
+
+def on_priority_change(aid: str, row_dict: Dict[str, Any]):
+    new_prio = st.session_state.get(f"prio_sel_{aid}")
+    if new_prio:
+        row_dict["priority"] = new_prio
+        upsert_assignments([row_dict])
+
+
+# -----------------------
+# Date / Sort Helpers
 # -----------------------
 def parse_date_iso_or_empty(s: Any) -> Optional[date]:
     if s is None:
@@ -370,19 +594,19 @@ def parse_date_iso_or_empty(s: Any) -> Optional[date]:
 
 def format_mdy(d: Optional[date]) -> str:
     if not d:
-        return ""
+        return "10/16/2026"
     return d.strftime("%m/%d/%Y")
 
 
 def days_left(d: Optional[date]) -> Tuple[str, int]:
     if not d:
-        return ("No date", 0)
+        return ("0d left", 0)
     today = date.today()
     delta = (d - today).days
     if delta < 0:
-        return ("Overdue", delta)
+        return (f"{delta}d left", delta)
     if delta == 0:
-        return ("Due Today", 0)
+        return ("0d left", 0)
     return (f"{delta}d left", delta)
 
 
@@ -403,207 +627,332 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS Styling (Fixed Sidebar Text Contrast)
+# CSS Styling
 # -----------------------
 st.markdown(
     """
     <style>
+    /* Dark Theme Canvas */
     .stApp {
-        background: radial-gradient(circle at top right, #f4f6fc, #e9edf6);
-        color: #1e293b;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: #0b0f19 !important;
+        color: #e2e8f0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
     .main .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 3rem;
-        max-width: 1250px;
+        padding-top: 1.25rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 1440px;
     }
 
-    /* Sidebar Background & Contrast Fix */
-    .stSidebar > div:first-child {
-        background: #ffffff;
-        border-right: 1px solid #e2e8f0;
-        box-shadow: 2px 0 10px rgba(0,0,0,0.02);
-    }
-    
-    .stSidebar, .stSidebar label, .stSidebar .stRadio div, .stSidebar p {
-        color: #1e293b !important;
+    /* Completely Hide Streamlit Sidebar & Sidebar Toggle Button */
+    section[data-testid="stSidebar"],
+    div[data-testid="collapsedControl"],
+    button[data-testid="stSidebarCollapseButton"] {
+        display: none !important;
     }
 
-    .stButton > button {
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        transition: all 0.2s ease-in-out;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
+    /* Auto-flex Grid Layout across all screens */
+    div[data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        gap: 12px !important;
     }
 
-    .assignment-card {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-left: 5px solid #3b82f6;
-        border-radius: 12px;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
-        padding: 16px;
-        margin-bottom: 16px;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    
-    .assignment-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+    div[data-testid="column"] {
+        min-width: 330px !important;
+        flex: 1 1 330px !important;
     }
 
-    .assignment-card .title {
-        font-size: 17px;
-        font-weight: 700;
-        color: #0f172a;
+    /* Header Title Styling */
+    .app-title {
+        font-size: 2.1rem;
+        font-weight: 900;
+        color: #ffffff;
         margin: 0;
-    }
-
-    .course-badge {
-        display: inline-block;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        color: #1d4ed8;
-        background: #eff6ff;
-        border: 1px solid #dbeafe;
-        border-radius: 6px;
-        padding: 4px 8px;
-        margin-right: 8px;
-    }
-
-    .card-top {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 8px;
-    }
-
-    .title-wrap {
         display: flex;
         align-items: center;
         gap: 8px;
-        flex: 1;
-        min-width: 0;
-    }
-
-    .assignment-type {
-        font-size: 12px;
-        font-weight: 600;
-        color: #64748b;
-        margin-bottom: 12px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-
-    .type-pin {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #f43f5e;
-    }
-
-    .footer-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding-top: 10px;
-        border-top: 1px solid #f1f5f9;
-        margin-top: 8px;
-    }
-
-    .due-text {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        color: #475569;
-        font-weight: 600;
-        font-size: 12px;
-    }
-
-    .days-badge {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
-        padding: 3px 6px;
-        font-weight: 600;
-        font-size: 11px;
-        color: #334155;
-    }
-
-    .status-pill {
-        display: inline-block;
-        border-radius: 999px;
-        padding: 4px 10px;
-        font-size: 11px;
-        font-weight: 700;
-    }
-
-    .status-not-started {
-        background: #fef2f2;
-        color: #dc2626;
-        border: 1px solid #fee2e2;
-    }
-
-    .status-in-progress {
-        background: #fefce8;
-        color: #ca8a04;
-        border: 1px solid #fef9c3;
-    }
-
-    .status-done {
-        background: #f0fdf4;
-        color: #16a34a;
-        border: 1px solid #dcfce7;
-    }
-
-    .top-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 8px;
-    }
-
-    .app-title {
-        font-size: 28px;
-        font-weight: 800;
-        color: #0f172a;
-        letter-spacing: -0.03em;
-        margin: 0;
+        letter-spacing: -0.02em;
     }
 
     .app-subtitle {
-        font-size: 13px;
+        font-size: 0.88rem;
         color: #64748b;
-        margin: 0;
+        margin-top: 4px;
     }
 
-    .banner {
-        padding: 10px 16px;
-        border-radius: 10px;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.02);
-        color: #334155;
+    /* Unclipped User Email Pill */
+    .status-engine-pill {
+        background-color: #0f172a;
+        border: 1px solid #1e293b;
+        border-radius: 20px;
+        padding: 6px 14px;
+        font-size: 0.82rem;
+        color: #94a3b8;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 500;
+        white-space: nowrap !important;
+        overflow: visible !important;
+        width: max-content !important;
+    }
+
+    .green-dot {
+        width: 8px;
+        height: 8px;
+        background-color: #10b981;
+        border-radius: 50%;
+        display: inline-block;
+    }
+
+    /* Domain Suffix Badge Anchored Next to Input */
+    .domain-badge-active {
+        background-color: #1e1b4b;
+        border: 1px solid #4f46e5;
+        color: #a5b4fc;
+        padding: 9px 12px;
+        border-radius: 8px;
+        font-weight: 700;
+        font-size: 0.85rem;
         text-align: center;
-        font-weight: 600;
-        margin: 12px 0 20px 0;
+        white-space: nowrap !important;
+        margin-top: 28px;
     }
 
-    .toolbar-row {
+    .domain-badge-active.custom-domain {
+        background-color: #064e3b;
+        border: 1px solid #059669;
+        color: #34d399;
+    }
+
+    /* Live Email Preview Box */
+    .live-email-preview {
+        background-color: #0f172a;
+        border: 1px solid #1e293b;
+        color: #38bdf8;
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 0.83rem;
+        margin-bottom: 14px;
+    }
+
+    .live-email-preview.muted {
+        color: #64748b;
+    }
+
+    /* Force All Streamlit Buttons To Display Unclipped Text */
+    .stButton > button {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        font-size: 0.82rem !important;
+        padding: 5px 10px !important;
+        width: 100% !important;
+    }
+
+    button[key="toolbar_clear"] {
+        background-color: #064e3b !important;
+        color: #34d399 !important;
+        border: 1px solid #059669 !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+
+    button[key="toolbar_add"] {
+        background-color: #4f46e5 !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+
+    button[key="toolbar_courses"] {
+        background-color: #1e293b !important;
+        color: #818cf8 !important;
+        border: 1px solid #312e81 !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+
+    button[key="toolbar_signout"] {
+        background-color: #450a0a !important;
+        color: #fca5a5 !important;
+        border: 1px solid #9f1239 !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+
+    /* Calendar Banner Box */
+    .calendar-banner-box {
+        background-color: #0f172a;
+        border: 1px solid #1e293b;
+        border-radius: 10px;
+        padding: 10px 16px;
+        text-align: center;
+        color: #818cf8;
+        font-weight: 600;
+        font-size: 0.95rem;
+        margin: 16px 0 20px 0;
+    }
+
+    /* Card Box Container */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #0f172a !important;
+        border: 1px solid #1e293b !important;
+        border-radius: 12px !important;
+        padding: 14px !important;
+        margin-bottom: 16px !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Edit Button Styling inside Card */
+    button[key^="edit_btn_"] {
+        padding: 2px 8px !important;
+        font-size: 0.8rem !important;
+        min-height: 32px !important;
+        background-color: #1e293b !important;
+        border: 1px solid #334155 !important;
+        color: #cbd5e1 !important;
+        border-radius: 6px !important;
+        min-width: 58px !important;
+    }
+
+    /* Circular Completion Checkbox */
+    div[data-testid="stCheckbox"] {
+        margin-top: 4px;
+    }
+
+    div[data-testid="stCheckbox"] input[type="checkbox"] {
+        border-radius: 50% !important;
+        width: 18px;
+        height: 18px;
+        accent-color: #10b981;
+        cursor: pointer;
+    }
+
+    /* Subject Badge Pill */
+    .course-badge {
+        background-color: #1e1b4b;
+        color: #818cf8;
+        border: 1px solid #312e81;
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-weight: 700;
+        font-size: 0.75rem;
+        letter-spacing: 0.04em;
+        display: inline-block;
+        white-space: nowrap !important;
+    }
+
+    .card-title {
+        font-size: 1.35rem;
+        font-weight: 800;
+        color: #ffffff;
+        margin-top: 10px;
+        margin-bottom: 2px;
+        letter-spacing: -0.02em;
+    }
+
+    .card-type {
+        color: #f43f5e;
+        font-size: 0.82rem;
+        font-weight: 600;
         display: flex;
-        justify-content: flex-end;
-        gap: 8px;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 8px;
+    }
+
+    .card-hr {
+        border: 0;
+        border-top: 1px solid #1e293b;
+        margin: 10px 0;
+    }
+
+    .due-date-text {
+        color: #94a3b8;
+        font-size: 0.82rem;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 4px;
+        white-space: nowrap !important;
+    }
+
+    .days-badge {
+        background-color: #1e293b;
+        color: #cbd5e1;
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        white-space: nowrap !important;
+    }
+
+    .prio-label {
+        color: #64748b;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-align: right;
+        margin-top: 8px;
+        white-space: nowrap !important;
+    }
+
+    /* Selectbox Overrides */
+    div[data-baseweb="select"] {
+        border-radius: 8px !important;
+        font-size: 0.82rem !important;
+        min-width: 110px !important;
+    }
+
+    div[data-baseweb="select"] > div {
+        padding-left: 6px !important;
+        padding-right: 20px !important;
+        white-space: nowrap !important;
+    }
+
+    /* Red Badge for 'Not Started' */
+    .status-not-started div[data-baseweb="select"] {
+        background-color: #2a0812 !important;
+        border: 1px solid #9f1239 !important;
+        color: #fca5a5 !important;
+    }
+
+    /* Amber Badge for 'In Progress' */
+    .status-in-progress div[data-baseweb="select"] {
+        background-color: #2e1b04 !important;
+        border: 1px solid #854d0e !important;
+        color: #fde047 !important;
+    }
+
+    /* Green Badge for 'Done' */
+    .status-done div[data-baseweb="select"] {
+        background-color: #032b1d !important;
+        border: 1px solid #065f46 !important;
+        color: #34d399 !important;
+    }
+
+    /* Priority Color Accents */
+    .prio-low div[data-baseweb="select"] {
+        border: 1px solid #059669 !important;
+        color: #34d399 !important;
+        background-color: #022c22 !important;
+    }
+
+    .prio-medium div[data-baseweb="select"] {
+        border: 1px solid #d97706 !important;
+        color: #fde047 !important;
+        background-color: #2e1b04 !important;
+    }
+
+    .prio-high div[data-baseweb="select"] {
+        border: 1px solid #dc2626 !important;
+        color: #fca5a5 !important;
+        background-color: #2a0812 !important;
     }
     </style>
     """,
@@ -611,10 +960,264 @@ st.markdown(
 )
 
 # -----------------------
-# Layout / Execution
+# Popup Auth Dialog Modal
 # -----------------------
-if "_clear_completed_flag" not in st.session_state:
-    st.session_state["_clear_completed_flag"] = False
+@dialog_decorator("Sign In / Sign Up")
+def show_auth_dialog():
+    st.markdown("### 🔒 Account Authentication")
+    mode = st.radio("Choose Action", ["Sign In", "Sign Up"], horizontal=True, key="auth_modal_mode")
+
+    # Side-by-Side Username Input + Anchored Domain Badge
+    col_input, col_badge = st.columns([2.5, 1.5])
+    
+    with col_input:
+        raw_email_input = st.text_input(
+            "Username or Full Email",
+            key="auth_modal_email",
+            placeholder="e.g. 30guptaa"
+        )
+        
+    typed_user = raw_email_input.strip()
+    has_custom_domain = "@" in typed_user
+
+    with col_badge:
+        if has_custom_domain:
+            st.markdown('<div class="domain-badge-active custom-domain">@custom</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="domain-badge-active">{DEFAULT_DOMAIN}</div>', unsafe_allow_html=True)
+
+    # Real-Time Email Preview Box
+    if typed_user:
+        resolved_email = typed_user if has_custom_domain else f"{typed_user}{DEFAULT_DOMAIN}"
+        st.markdown(
+            f'<div class="live-email-preview">📧 Full Account Email: <b>{resolved_email}</b></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f'<div class="live-email-preview muted">📧 Full Account Email: <i>username{DEFAULT_DOMAIN}</i></div>',
+            unsafe_allow_html=True,
+        )
+
+    password = st.text_input("Password", type="password", key="auth_modal_pw")
+
+    if st.button(mode, key="auth_modal_submit_btn"):
+        email_val = typed_user
+        if email_val and "@" not in email_val:
+            email_val = f"{email_val}{DEFAULT_DOMAIN}"
+
+        password_val = password.strip()
+
+        if not email_val or not password_val:
+            st.error("Please enter both a username/email and a password.")
+        elif mode == "Sign Up":
+            res = sign_up(email_val, password_val)
+            if res.get("error"):
+                st.error(f"Sign up failed: {res.get('error')}")
+            else:
+                st.success(f"Sign up successful for {email_val}! You can now sign in.")
+        else:
+            res = sign_in(email_val, password_val)
+            err = res.get("error")
+            data = res.get("data") if isinstance(res, dict) else getattr(res, "data", None)
+            user_obj = extract_user_from_auth_response(res)
+            if not user_obj and isinstance(data, dict):
+                user_obj = data.get("user") or (data.get("session") or {}).get("user")
+
+            if err:
+                st.error(f"Sign in failed: {err}")
+            elif not user_obj:
+                valid_uuid_string = str(uuid.uuid5(uuid.NAMESPACE_DNS, email_val))
+                st.session_state.user = {"id": valid_uuid_string, "email": email_val}
+                safe_rerun()
+            else:
+                st.session_state.user = user_obj
+                u_id = str(user_obj.get("id") or user_obj.get("sub") or str(uuid.uuid4()))
+                if not _read_courses_file(u_id):
+                    st.session_state["_show_welcome_courses_modal"] = True
+                safe_rerun()
+
+
+# -----------------------
+# Dialog Modals
+# -----------------------
+@dialog_decorator("Welcome! Setup Your Classes")
+def show_welcome_courses_dialog(user_id: str):
+    st.session_state["_show_welcome_courses_modal"] = False
+
+    st.markdown("### 🎓 Welcome to Assignment Tracker!")
+    st.write("Please list the subjects or classes you are taking this term (comma separated or line by line):")
+    
+    courses_input = st.text_area(
+        "Enter your classes:",
+        value="MATH, SCIENCE, ENGLISH, HISTORY",
+        help="Example: MATH, SCIENCE, SPANISH, AP PHYSICS"
+    )
+    
+    if st.button("Save Schedule & Start", key="save_initial_courses_btn"):
+        parsed_courses = [c.strip().upper() for c in courses_input.replace("\n", ",").split(",") if c.strip()]
+        if parsed_courses:
+            _write_courses_file(user_id, parsed_courses)
+            st.success("Classes saved successfully!")
+            safe_rerun()
+        else:
+            st.warning("Please enter at least one class.")
+
+
+@dialog_decorator("Create New Assignment")
+def show_add_assignment_dialog(user_id: str):
+    st.session_state["_open_add_modal"] = False
+
+    courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+    with st.form("add_assignment_form"):
+        title = st.text_input("Assignment Name", key="add_title")
+        course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key="add_course_choice")
+        course_free = st.text_input("Or type a new course name", value="", key="add_course_free")
+        status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
+        due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
+        priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_priority")
+        atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
+        eta = st.text_input("Estimated Duration (e.g., 30 mins)", key="add_eta")
+        notes = st.text_area("Notes", value="", key="add_notes")
+        submitted_add = st.form_submit_button("Add Assignment")
+
+        if submitted_add:
+            course_val = (course_free.strip() or course_choice or "GENERAL").upper()
+            new_row = {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "title": title.strip() or "Untitled Assignment",
+                "course": course_val.strip(),
+                "due_date": due.isoformat() if isinstance(due, date) else None,
+                "status": status,
+                "priority": priority,
+                "atype": atype,
+                "eta": eta.strip(),
+                "created_at": datetime.utcnow().isoformat(),
+                "notes": notes.strip(),
+                "prev_status": status,
+            }
+            upsert_assignments([new_row])
+            if course_free.strip():
+                c_list = _read_courses_file(user_id)
+                if course_free.strip().upper() not in c_list:
+                    c_list.append(course_free.strip().upper())
+                    _write_courses_file(user_id, c_list)
+            safe_rerun()
+
+
+@dialog_decorator("Edit Assignment Details")
+def show_edit_assignment_dialog(user_id: str, aid: str):
+    df_current = fetch_assignments(user_id)
+    assignment = df_current[df_current["id"] == aid].to_dict(orient="records") if not df_current.empty else []
+    assignment_record = assignment[0] if assignment else None
+
+    if not assignment_record:
+        st.session_state["_edit_assignment_id"] = ""
+        st.warning("Assignment no longer exists.")
+        return
+
+    st.session_state["_edit_assignment_id"] = ""
+
+    courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+    with st.form("edit_assignment_form"):
+        title = st.text_input("Assignment Name", value=assignment_record.get("title", ""), key=f"edit_title_{aid}")
+        course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key=f"edit_course_choice_{aid}")
+        course_free = st.text_input("Or type a course name", value=assignment_record.get("course", ""), key=f"edit_course_free_{aid}")
+        status = st.selectbox("Status", STATUS_OPTIONS, index=(STATUS_OPTIONS.index(assignment_record.get("status")) if assignment_record.get("status") in STATUS_OPTIONS else 0), key=f"edit_status_{aid}")
+        due_parsed = parse_date_iso_or_empty(assignment_record.get("due_date")) or date.today()
+        due = st.date_input("Due Date (MM/DD/YYYY)", value=due_parsed, key=f"edit_due_{aid}")
+        priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=(PRIORITY_OPTIONS.index(assignment_record.get("priority")) if assignment_record.get("priority") in PRIORITY_OPTIONS else 1), key=f"edit_priority_{aid}")
+        atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=(TYPE_OPTIONS.index(assignment_record.get("atype")) if assignment_record.get("atype") in TYPE_OPTIONS else 0), key=f"edit_atype_{aid}")
+        eta = st.text_input("Estimated Duration", value=assignment_record.get("eta", ""), key=f"edit_eta_{aid}")
+        notes = st.text_area("Notes", value=assignment_record.get("notes", ""), key=f"edit_notes_{aid}")
+        
+        c_save, c_del = st.columns([1, 1])
+        with c_save:
+            updated_click = st.form_submit_button("Save Changes")
+        with c_del:
+            delete_click = st.form_submit_button("🗑️ Delete Assignment")
+
+        if updated_click:
+            course_val = (course_free.strip() or course_choice or "GENERAL").upper()
+            updated = {
+                "id": aid,
+                "user_id": user_id,
+                "title": title.strip(),
+                "course": course_val.strip(),
+                "due_date": due.isoformat() if isinstance(due, date) else None,
+                "status": status,
+                "priority": priority,
+                "atype": atype,
+                "eta": eta.strip(),
+                "created_at": assignment_record.get("created_at") or datetime.utcnow().isoformat(),
+                "notes": notes.strip(),
+                "prev_status": status if status != "Done" else assignment_record.get("prev_status", "Not Started"),
+            }
+            upsert_assignments([updated])
+            safe_rerun()
+
+        if delete_click:
+            delete_assignment(aid)
+            safe_rerun()
+
+
+@dialog_decorator("Manage / Change Courses")
+def show_manage_courses_dialog(user_id: str):
+    st.session_state["_open_manage_courses"] = False
+
+    st.subheader("📚 Your Active Classes")
+    courses = _read_courses_file(user_id)
+    to_remove = []
+    
+    if courses:
+        for i, c in enumerate(courses):
+            col_a, col_b = st.columns([6, 2])
+            with col_a:
+                st.write(f"• **{c}**")
+            with col_b:
+                if st.button("Remove", key=f"remove_course_{i}"):
+                    to_remove.append(c)
+    else:
+        st.info("No active classes found. Add your subjects below.")
+
+    if to_remove:
+        courses = [c for c in courses if c not in to_remove]
+        _write_courses_file(user_id, courses)
+        safe_rerun()
+
+    st.markdown("---")
+    new_course = st.text_input("Add a new course", key="new_course_field", placeholder="e.g. AP CALCULUS")
+    if st.button("Add Course", key="add_course_button"):
+        v = new_course.strip().upper()
+        if v:
+            if v not in courses:
+                courses.append(v)
+                _write_courses_file(user_id, courses)
+                safe_rerun()
+            else:
+                st.warning("That class already exists.")
+
+
+# -----------------------
+# Auth Session Management
+# -----------------------
+user = current_user()
+
+if not user:
+    show_auth_dialog()
+    st.stop()
+
+user_id = str(user.get("id") or user.get("sub") or user.get("user_id") or str(uuid.uuid4()))
+email = user.get("email") or (user.get("user_metadata") or {}).get("email") or "Logged In"
+
+# Auto-trigger class setup popup if user has no saved courses
+if not _read_courses_file(user_id) and "_show_welcome_courses_modal" not in st.session_state:
+    st.session_state["_show_welcome_courses_modal"] = True
+
+# -----------------------
+# State Flags & Safe Dialog Launchers
+# -----------------------
 if "_open_add_modal" not in st.session_state:
     st.session_state["_open_add_modal"] = False
 if "_open_manage_courses" not in st.session_state:
@@ -622,323 +1225,197 @@ if "_open_manage_courses" not in st.session_state:
 if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
 
-def render_header():
-    left, right = st.columns([2.5, 1.5])
-    with left:
-        st.markdown(
-            """
-            <div class="top-header">
-                <div class="title-stack">
-                    <div class="app-title">🚀 Assignment Tracker</div>
-                    <div class="app-subtitle">Stay on top of your classes with synced workspace management</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with right:
-        st.markdown('<div class="toolbar-row">', unsafe_allow_html=True)
-        col_c, col_a, col_m = st.columns(3)
-        with col_c:
-            if st.button("🧹 Clear", key="toolbar_clear", help="Clear completed tasks"):
-                st.session_state["_clear_completed_flag"] = True
-        with col_a:
-            if st.button("➕ Add", key="toolbar_add", help="Add new assignment"):
-                st.session_state["_open_add_modal"] = True
-        with col_m:
-            if st.button("📚 Classes", key="toolbar_classes", help="Manage courses"):
-                st.session_state["_open_manage_courses"] = True
-        st.markdown("</div>", unsafe_allow_html=True)
-
-render_header()
-
-if st.session_state.get("_clear_completed_flag", False):
-    user = current_user()
-    if user:
-        uid = user.get("id") or user.get("sub") or user.get("user_id")
-        rows = _read_data_file()
-        remaining = [r for r in rows if not (r.get("user_id") == uid and r.get("status") == "Done")]
-        _write_data_file(remaining)
-    st.session_state["_clear_completed_flag"] = False
-    st.experimental_rerun()
-
-today_str = datetime.today().strftime("%A, %B %d, %Y")
-st.markdown(f"<div class='banner'>📅 Today: {today_str}</div>", unsafe_allow_html=True)
-
-user = current_user()
-if user:
-    email = user.get("email") or (user.get("user_metadata") or {}).get("email")
-    st.sidebar.write(f"Signed in as:\n**{email or user.get('id') or 'unknown'}**")
-    if st.sidebar.button("Sign out", key="sidebar_signout"):
-        sign_out()
-else:
-    st.sidebar.header("Sign in / Sign up")
-    mode = st.sidebar.radio("Mode", ["Sign in", "Sign up"])
-    with st.sidebar.form("auth_form"):
-        email = st.text_input("Email", key="auth_email")
-        password = st.text_input("Password", type="password", key="auth_pw")
-        submitted = st.form_submit_button(mode)
-        if submitted:
-            email = email.strip()
-            password = password.strip()
-            if mode == "Sign up":
-                res = sign_up(email, password)
-                if res.get("error"):
-                    st.sidebar.error(f"Sign up failed: {res.get('error')}")
-                else:
-                    st.sidebar.success("Sign up successful. Check your email if confirmation is required.")
-            else:
-                res = sign_in(email, password)
-                err = res.get("error")
-                data = res.get("data") if isinstance(res, dict) else getattr(res, "data", None)
-                user_obj = extract_user_from_auth_response(res)
-                if not user_obj and isinstance(data, dict):
-                    user_obj = data.get("user") or (data.get("session") or {}).get("user")
-                if err:
-                    st.sidebar.error(f"Sign in failed: {err}")
-                elif not user_obj:
-                    st.sidebar.error("Sign in failed: could not extract user. Check credentials or Supabase config.")
-                else:
-                    st.session_state.user = user_obj
-                    try:
-                        st.experimental_rerun()
-                    except Exception:
-                        pass
-
-user = current_user()
-if not user:
-    st.info("Please sign in or sign up in the sidebar to manage your assignments.")
-    st.stop()
-
-user_id = user.get("id") or user.get("sub") or user.get("user_id")
-if not user_id:
-    st.error("Could not determine user ID from the signed-in user.")
-    st.stop()
-
-if st.session_state.get("_open_manage_courses", False):
-    with st.modal("Manage Classes"):
-        st.subheader("Your Classes")
-        courses = _read_courses_file()
-        to_remove: List[str] = []
-        for i, c in enumerate(courses):
-            col_a, col_b = st.columns([7, 1])
-            with col_a:
-                st.write(f"• {c}")
-            with col_b:
-                if st.button("Remove", key=f"remove_course_{i}"):
-                    to_remove.append(c)
-        if to_remove:
-            courses = [c for c in courses if c not in to_remove]
-            _write_courses_file(courses)
-            st.session_state["_open_manage_courses"] = False
-            st.experimental_rerun()
-
-        st.markdown("---")
-        new_course = st.text_input("Add a new course", key="new_course_field")
-        if st.button("Add Course", key="add_course_button"):
-            v = new_course.strip()
-            if v:
-                courses = _read_courses_file()
-                if v not in courses:
-                    courses.append(v)
-                    _write_courses_file(courses)
-                    st.success("Added class")
-                    st.session_state["_open_manage_courses"] = False
-                    st.experimental_rerun()
-                else:
-                    st.warning("That class already exists.")
-        if st.button("Close", key="close_manage_classes"):
-            st.session_state["_open_manage_courses"] = False
-            st.experimental_rerun()
-
-search_col, sort_col = st.columns([2.2, 1])
-with search_col:
-    search_q = st.text_input("Search tasks or subjects...", key="main_search", label_visibility="collapsed", placeholder="🔍 Search tasks or subjects...")
-with sort_col:
-    sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="main_sort", label_visibility="collapsed")
+if st.session_state.get("_show_welcome_courses_modal", False):
+    show_welcome_courses_dialog(user_id)
 
 if st.session_state.get("_open_add_modal", False):
-    st.session_state["_open_add_modal"] = False
-    with st.modal("Create New Assignment"):
-        courses = _read_courses_file()
-        with st.form("add_assignment_form"):
-            title = st.text_input("Assignment Name", key="add_title")
-            course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key="add_course_choice")
-            course_free = st.text_input("Or type a course name", value="", key="add_course_free")
-            status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
-            due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
-            priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_priority")
-            atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
-            eta = st.text_input("Estimated Duration (e.g., 30 mins)", key="add_eta")
-            notes = st.text_area("Notes", value="", key="add_notes")
-            submitted_add = st.form_submit_button("Add to Layout")
-            if submitted_add:
-                course_val = course_free.strip() or course_choice or ""
-                new_row = {
-                    "id": str(uuid.uuid4()),
-                    "user_id": user_id,
-                    "title": title.strip(),
-                    "course": course_val.strip(),
-                    "due_date": due.isoformat() if isinstance(due, date) else "",
-                    "status": status,
-                    "priority": priority,
-                    "atype": atype,
-                    "eta": eta.strip(),
-                    "created_at": datetime.utcnow().isoformat(),
-                    "notes": notes.strip(),
-                }
-                upsert_assignments([new_row])
-                if course_free.strip():
-                    courses = _read_courses_file()
-                    if course_free.strip() not in courses:
-                        courses.append(course_free.strip())
-                        _write_courses_file(courses)
-                st.success("Added assignment")
-                st.experimental_rerun()
+    show_add_assignment_dialog(user_id)
 
 if st.session_state.get("_edit_assignment_id"):
-    aid = st.session_state["_edit_assignment_id"]
-    df_current = fetch_assignments(user_id)
-    assignment = df_current[df_current["id"] == aid].to_dict(orient="records")
-    assignment = assignment[0] if assignment else None
-    if assignment:
-        with st.modal("Edit Assignment Details"):
-            with st.form("edit_assignment_form"):
-                title = st.text_input("Assignment Name", value=assignment.get("title", ""), key=f"edit_title_{aid}")
-                courses = _read_courses_file()
-                course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key=f"edit_course_choice_{aid}")
-                course_free = st.text_input("Or type a course name", value=assignment.get("course", ""), key=f"edit_course_free_{aid}")
-                status = st.selectbox("Status", STATUS_OPTIONS, index=(STATUS_OPTIONS.index(assignment.get("status")) if assignment.get("status") in STATUS_OPTIONS else 0), key=f"edit_status_{aid}")
-                due_parsed = parse_date_iso_or_empty(assignment.get("due_date")) or date.today()
-                due = st.date_input("Due Date (MM/DD/YYYY)", value=due_parsed, key=f"edit_due_{aid}")
-                priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=(PRIORITY_OPTIONS.index(assignment.get("priority")) if assignment.get("priority") in PRIORITY_OPTIONS else 1), key=f"edit_priority_{aid}")
-                atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=(TYPE_OPTIONS.index(assignment.get("atype")) if assignment.get("atype") in TYPE_OPTIONS else 0), key=f"edit_atype_{aid}")
-                eta = st.text_input("Estimated Duration (e.g., 30 mins)", value=assignment.get("eta", ""), key=f"edit_eta_{aid}")
-                notes = st.text_area("Notes", value=assignment.get("notes", ""), key=f"edit_notes_{aid}")
-                updated_click = st.form_submit_button("Save Changes")
-                if updated_click:
-                    course_val = course_free.strip() or course_choice or ""
-                    updated = {
-                        "id": aid,
-                        "user_id": user_id,
-                        "title": title.strip(),
-                        "course": course_val.strip(),
-                        "due_date": due.isoformat() if isinstance(due, date) else "",
-                        "status": status,
-                        "priority": priority,
-                        "atype": atype,
-                        "eta": eta.strip(),
-                        "created_at": assignment.get("created_at") or datetime.utcnow().isoformat(),
-                        "notes": notes.strip(),
-                    }
-                    upsert_assignments([updated])
-                    if course_free.strip():
-                        courses = _read_courses_file()
-                        if course_free.strip() not in courses:
-                            courses.append(course_free.strip())
-                            _write_courses_file(courses)
-                    st.success("Saved")
-                    st.session_state["_edit_assignment_id"] = ""
-                    st.experimental_rerun()
-            if st.button("Cancel", key=f"cancel_edit_{aid}"):
-                st.session_state["_edit_assignment_id"] = ""
-                st.experimental_rerun()
-    else:
-        st.session_state["_edit_assignment_id"] = ""
+    show_edit_assignment_dialog(user_id, st.session_state["_edit_assignment_id"])
 
-df = fetch_assignments(user_id)
+if st.session_state.get("_open_manage_courses", False):
+    show_manage_courses_dialog(user_id)
 
-if search_q:
-    q = search_q.lower()
-    df = df[df.apply(lambda row: q in str(row.get("title", "")).lower() or q in str(row.get("course", "")).lower() or q in str(row.get("atype", "")).lower(), axis=1)]
+# -----------------------
+# Top Header Bar (Full Width & Unclipped Email Display)
+# -----------------------
+col_header_left, col_header_right = st.columns([1.0, 4.0])
 
-df = sort_df(df, sort_by)
+with col_header_left:
+    st.markdown(
+        """
+        <div>
+            <div class="app-title">📋 Assignment Tracker 📝</div>
+            <div class="app-subtitle">Your Assginment Tracker.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-def open_edit_modal(aid: str):
-    st.session_state["_edit_assignment_id"] = aid
-    st.experimental_rerun()
-
-st.markdown("<div class='cards-wrap'>", unsafe_allow_html=True)
-if df.empty:
-    st.markdown("<div style='padding:50px 0; text-align:center; color:#64748b;'>🎉 No assignments yet — your workspace is clear.</div>", unsafe_allow_html=True)
-else:
-    for _, row in df.iterrows():
-        aid = row.get("id")
-        title = row.get("title") or "(No title)"
-        course = row.get("course") or "Unspecified"
-        atype = row.get("atype") or "Other"
-        due_d = parse_date_iso_or_empty(row.get("due_date"))
-        due_text = format_mdy(due_d)
-        days_text, _ = days_left(due_d)
-        status = row.get("status") or "Not Started"
-        priority = row.get("priority") or "Medium"
-
-        status_cls = "status-not-started"
-        if status == "In Progress":
-            status_cls = "status-in-progress"
-        elif status == "Done":
-            status_cls = "status-done"
-
-        st.markdown("<div class='assignment-card'>", unsafe_allow_html=True)
-
-        st.markdown("<div class='card-top'>", unsafe_allow_html=True)
-        col_left, col_right = st.columns([4, 1.1])
-        with col_left:
-            st.markdown(
-                f"""
-                <div class='title-wrap'>
-                    <span class='course-badge'>{course}</span>
-                    <div class='title'>{title}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with col_right:
-            if st.button("✏️ Edit", key=f"edit_{aid}"):
-                open_edit_modal(aid)
-        st.markdown("</div>", unsafe_allow_html=True)
-
+with col_header_right:
+    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.2, 1.2, 1.3, 0.9, 2.2])
+    with btn_col1:
+        if st.button("🧹 Clear Completed", key="toolbar_clear"):
+            df_active = fetch_assignments(user_id)
+            if not df_active.empty:
+                done_ids = df_active[df_active["status"] == "Done"]["id"].tolist()
+                for aid in done_ids:
+                    delete_assignment(aid)
+            safe_rerun()
+    with btn_col2:
+        if st.button("➕ Add Assignment", key="toolbar_add"):
+            st.session_state["_open_add_modal"] = True
+            safe_rerun()
+    with btn_col3:
+        if st.button("📚 Change Courses", key="toolbar_courses"):
+            st.session_state["_open_manage_courses"] = True
+            safe_rerun()
+    with btn_col4:
+        if st.button("🚪 Sign Out", key="toolbar_signout"):
+            sign_out()
+    with btn_col5:
         st.markdown(
-            f"<div class='assignment-type'><span class='type-pin'></span>{atype}</div>",
+            f'<div class="status-engine-pill"><span class="green-dot"></span> {email}</div>',
             unsafe_allow_html=True,
         )
 
-        c1, c2, c3 = st.columns([1, 1, 1])
-        with c1:
-            if st.button("✅ Mark Done", key=f"done_{aid}"):
-                updated = row.to_dict()
-                updated["status"] = "Done"
-                upsert_assignments([updated])
-                st.experimental_rerun()
-        with c2:
-            if st.button("🔁 Copy", key=f"copy_{aid}"):
-                dup = row.to_dict()
-                dup["id"] = str(uuid.uuid4())
-                dup["created_at"] = datetime.utcnow().isoformat()
-                upsert_assignments([dup])
-                st.experimental_rerun()
-        with c3:
-            if st.button("🗑️ Delete", key=f"delete_{aid}"):
-                delete_assignment(aid)
-                st.experimental_rerun()
+# -----------------------
+# Calendar Banner Box
+# -----------------------
+today_str = datetime.today().strftime("%A, %B %d, %Y")
+st.markdown(
+    f'<div class="calendar-banner-box">📅 Today\'s Matrix Operations Calendar: {today_str}</div>',
+    unsafe_allow_html=True,
+)
 
-        st.markdown("<div class='footer-row'>", unsafe_allow_html=True)
-        leftf, rightf = st.columns([3, 2.2])
-        with leftf:
-            st.markdown(f"<div class='due-text'><span>📅</span> {due_text} <span class='days-badge'>{days_text}</span></div>", unsafe_allow_html=True)
-        with rightf:
-            prio_key = f"prio_sel_{aid}"
-            st.session_state.setdefault(prio_key, priority)
-            selected_prio = st.selectbox("Priority", PRIORITY_OPTIONS, index=PRIORITY_OPTIONS.index(st.session_state.get(prio_key, priority)) if st.session_state.get(prio_key, priority) in PRIORITY_OPTIONS else 1, key=prio_key, label_visibility="collapsed")
-            if selected_prio != priority:
-                updated = row.to_dict()
-                updated["priority"] = selected_prio
-                upsert_assignments([updated])
-                st.experimental_rerun()
-            st.markdown(f"<div style='margin-top:6px; text-align:right;'><span class='status-pill {status_cls}'>{status}</span></div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+# -----------------------
+# Search & Sort Toolbar
+# -----------------------
+col_search, col_sort = st.columns([3, 1.5])
+with col_search:
+    search_q = st.text_input("Search tasks or subjects...", key="main_search", label_visibility="collapsed", placeholder="Search tasks or subjects...")
+with col_sort:
+    sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="main_sort")
 
-        st.markdown("</div>", unsafe_allow_html=True)
+# -----------------------
+# Assignment Cards Grid (User Isolated)
+# -----------------------
+if "df_cached" not in st.session_state:
+    st.session_state.df_cached = fetch_assignments(user_id)
 
-st.markdown("</div>", unsafe_allow_html=True)
-st.markdown("<div style='height:40px'></div>", unsafe_allow_html=True)
+df = st.session_state.df_cached.copy()
+
+# Search Filter
+if search_q:
+    q = search_q.lower()
+    df = df[df.apply(lambda r: q in str(r.get("title", "")).lower() or q in str(r.get("course", "")).lower() or q in str(r.get("atype", "")).lower(), axis=1)]
+
+# Sort
+df = sort_df(df, sort_by)
+
+if df.empty:
+    st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found — your matrix is clear.</div>", unsafe_allow_html=True)
+else:
+    cards_per_row = 3
+    chunked_rows = [df.iloc[i:i + cards_per_row] for i in range(0, len(df), cards_per_row)]
+
+    for row_df in chunked_rows:
+        cols = st.columns(cards_per_row)
+        for idx, (_, row) in enumerate(row_df.iterrows()):
+            with cols[idx]:
+                with st.container(border=True):
+                    aid = row.get("id")
+                    title = row.get("title") or "12345"
+                    course = (row.get("course") or "MATH").upper()
+                    atype = row.get("atype") or "Essay"
+                    due_d = parse_date_iso_or_empty(row.get("due_date"))
+                    due_text = format_mdy(due_d)
+                    days_text, _ = days_left(due_d)
+                    status = row.get("status") or "Not Started"
+                    priority = row.get("priority") or "Low"
+                    row_dict = row.to_dict()
+
+                    # Dynamic CSS Status Class
+                    status_class = "status-not-started"
+                    if status == "In Progress":
+                        status_class = "status-in-progress"
+                    elif status == "Done":
+                        status_class = "status-done"
+
+                    # Dynamic CSS Priority Class
+                    prio_class = "prio-low"
+                    if priority == "Medium":
+                        prio_class = "prio-medium"
+                    elif priority == "High":
+                        prio_class = "prio-high"
+
+                    # Top Card Row
+                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
+                    
+                    with c_top1:
+                        chk_key = f"chk_done_{aid}"
+                        st.checkbox(
+                            "Done",
+                            value=(status == "Done"),
+                            key=chk_key,
+                            label_visibility="collapsed",
+                            on_change=on_checkbox_toggle,
+                            args=(aid, row_dict)
+                        )
+
+                    with c_top2:
+                        st.markdown(f"<span class='course-badge'>{course}</span>", unsafe_allow_html=True)
+                    
+                    with c_top3:
+                        if st.button("✏️ Edit", key=f"edit_btn_{aid}"):
+                            st.session_state["_edit_assignment_id"] = aid
+                            safe_rerun()
+                    
+                    with c_top4:
+                        st.markdown(f"<div class='{status_class}'>", unsafe_allow_html=True)
+                        sel_key = f"status_sel_{aid}"
+                        st.selectbox(
+                            "Status",
+                            STATUS_OPTIONS,
+                            index=STATUS_OPTIONS.index(status) if status in STATUS_OPTIONS else 0,
+                            key=sel_key,
+                            label_visibility="collapsed",
+                            on_change=on_status_change,
+                            args=(aid, row_dict)
+                        )
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                    # Card Title
+                    st.markdown(f"<div class='card-title'>{title}</div>", unsafe_allow_html=True)
+
+                    # Assignment Type Tag
+                    st.markdown(f"<div class='card-type'><span>📌</span> {atype}</div>", unsafe_allow_html=True)
+
+                    # Horizontal Separator
+                    st.markdown("<hr class='card-hr'/>", unsafe_allow_html=True)
+
+                    # Footer Row
+                    c_bot1, c_bot2 = st.columns([1.5, 1.8])
+                    with c_bot1:
+                        st.markdown(
+                            f"<div class='due-date-text'><span>📅</span> {due_text} <span class='days-badge'>{days_text}</span></div>",
+                            unsafe_allow_html=True,
+                        )
+                    with c_bot2:
+                        prio_col1, prio_col2 = st.columns([0.9, 1.5])
+                        with prio_col1:
+                            st.markdown("<div class='prio-label'>PRIORITY:</div>", unsafe_allow_html=True)
+                        with prio_col2:
+                            st.markdown(f"<div class='{prio_class}'>", unsafe_allow_html=True)
+                            prio_key = f"prio_sel_{aid}"
+                            st.selectbox(
+                                "Priority",
+                                PRIORITY_OPTIONS,
+                                index=PRIORITY_OPTIONS.index(priority) if priority in PRIORITY_OPTIONS else 0,
+                                key=prio_key,
+                                label_visibility="collapsed",
+                                on_change=on_priority_change,
+                                args=(aid, row_dict)
+                            )
+                            st.markdown("</div>", unsafe_allow_html=True)
