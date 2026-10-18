@@ -513,21 +513,22 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Real-Time Callback Handlers
+# Real-Time Callback Handlers (Session State Memory Bound)
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     chk_val = st.session_state.get(f"chk_done_{aid}", False)
     
     if chk_val:
-        # If checking it as done, grab current status as prev_status if it's not already Done
+        # Checkbox ticked: store current status as previous before turning Done
         current_st = row_dict.get("status", "Not Started")
         if current_st != "Done":
             row_dict["prev_status"] = current_st
+            st.session_state[f"prev_st_{aid}"] = current_st
         new_status = "Done"
     else:
-        # If unchecking, restore previous status. If none exists or it was Done, fallback to In Progress
-        prev_st = row_dict.get("prev_status", "Not Started")
-        if not prev_st or prev_st == "Done":
+        # Checkbox unticked: pull stored previous status from session memory
+        prev_st = st.session_state.get(f"prev_st_{aid}") or row_dict.get("prev_status", "In Progress")
+        if prev_st == "Done" or not prev_st:
             prev_st = "In Progress"
         new_status = prev_st
 
@@ -539,9 +540,9 @@ def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
 def on_status_change(aid: str, row_dict: Dict[str, Any]):
     new_status = st.session_state.get(f"status_sel_{aid}")
     if new_status:
-        # Whenever status is changed via selectbox to a non-Done state, update prev_status immediately!
         if new_status != "Done":
             row_dict["prev_status"] = new_status
+            st.session_state[f"prev_st_{aid}"] = new_status
         row_dict["status"] = new_status
         st.session_state[f"chk_done_{aid}"] = (new_status == "Done")
         upsert_assignments([row_dict])
@@ -1311,7 +1312,9 @@ else:
                     due_d = parse_date_iso_or_empty(row.get("due_date"))
                     due_text = format_mdy(due_d)
                     days_text, _ = days_left(due_d)
-                    status = row.get("status") or "Not Started"
+                    
+                    # Sync initial status from row or active session state memory
+                    status = st.session_state.get(f"status_sel_{aid}") or row.get("status") or "Not Started"
                     priority = row.get("priority") or "Low"
                     row_dict = row.to_dict()
 
