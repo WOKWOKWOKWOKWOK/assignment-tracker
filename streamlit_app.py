@@ -610,6 +610,7 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 st.markdown(
     """
     <style>
+    /* Dark Theme Canvas */
     .stApp {
         background-color: #0b0f19 !important;
         color: #e2e8f0;
@@ -622,12 +623,14 @@ st.markdown(
         max-width: 1440px;
     }
 
+    /* Completely Hide Streamlit Sidebar & Sidebar Toggle Button */
     section[data-testid="stSidebar"],
     div[data-testid="collapsedControl"],
     button[data-testid="stSidebarCollapseButton"] {
         display: none !important;
     }
 
+    /* Auto-flex Grid Layout across all screens */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-wrap: wrap !important;
@@ -639,6 +642,7 @@ st.markdown(
         flex: 1 1 330px !important;
     }
 
+    /* Header Title Styling */
     .app-title {
         font-size: 2.1rem;
         font-weight: 900;
@@ -656,6 +660,7 @@ st.markdown(
         margin-top: 4px;
     }
 
+    /* Unclipped User Email Pill */
     .status-engine-pill {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -680,6 +685,7 @@ st.markdown(
         display: inline-block;
     }
 
+    /* Domain Suffix Badge Anchored Next to Input */
     .domain-badge-active {
         background-color: #1e1b4b;
         border: 1px solid #4f46e5;
@@ -699,6 +705,7 @@ st.markdown(
         color: #34d399;
     }
 
+    /* Live Email Preview Box */
     .live-email-preview {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -713,6 +720,7 @@ st.markdown(
         color: #64748b;
     }
 
+    /* Force All Streamlit Buttons To Display Unclipped Text */
     .stButton > button {
         white-space: nowrap !important;
         overflow: visible !important;
@@ -754,6 +762,7 @@ st.markdown(
         font-weight: 600 !important;
     }
 
+    /* Calendar Banner Box */
     .calendar-banner-box {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -766,6 +775,7 @@ st.markdown(
         margin: 16px 0 20px 0;
     }
 
+    /* Card Box Container */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
@@ -775,6 +785,7 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
+    /* Edit Button Styling inside Card */
     button[key^="edit_btn_"] {
         padding: 2px 8px !important;
         font-size: 0.8rem !important;
@@ -786,6 +797,7 @@ st.markdown(
         min-width: 58px !important;
     }
 
+    /* Circular Completion Checkbox */
     div[data-testid="stCheckbox"] {
         margin-top: 4px;
     }
@@ -798,6 +810,7 @@ st.markdown(
         cursor: pointer;
     }
 
+    /* Subject Badge Pill */
     .course-badge {
         background-color: #1e1b4b;
         color: #818cf8;
@@ -867,6 +880,7 @@ st.markdown(
         white-space: nowrap !important;
     }
 
+    /* Selectbox Overrides */
     div[data-baseweb="select"] {
         border-radius: 8px !important;
         font-size: 0.82rem !important;
@@ -879,24 +893,28 @@ st.markdown(
         white-space: nowrap !important;
     }
 
+    /* Red Badge for 'Not Started' */
     .status-not-started div[data-baseweb="select"] {
         background-color: #2a0812 !important;
         border: 1px solid #9f1239 !important;
         color: #fca5a5 !important;
     }
 
+    /* Amber Badge for 'In Progress' */
     .status-in-progress div[data-baseweb="select"] {
         background-color: #2e1b04 !important;
         border: 1px solid #854d0e !important;
         color: #fde047 !important;
     }
 
+    /* Green Badge for 'Done' */
     .status-done div[data-baseweb="select"] {
         background-color: #032b1d !important;
         border: 1px solid #065f46 !important;
         color: #34d399 !important;
     }
 
+    /* Priority Color Accents */
     .prio-low div[data-baseweb="select"] {
         border: 1px solid #059669 !important;
         color: #34d399 !important;
@@ -1242,7 +1260,7 @@ with col_header_right:
 # -----------------------
 today_str = datetime.today().strftime("%A, %B %d, %Y")
 st.markdown(
-    f'<div class="calendar-banner-box">📅 Today\'s Date: {today_str}</div>',
+    f'<div class="calendar-banner-box">📅 Today\'s Matrix Operations Calendar: {today_str}</div>',
     unsafe_allow_html=True,
 )
 
@@ -1253,7 +1271,7 @@ col_search, col_sort = st.columns([3, 1.5])
 with col_search:
     search_q = st.text_input("Search tasks or subjects...", key="main_search", label_visibility="collapsed", placeholder="Search tasks or subjects...")
 with col_sort:
-    sort_by = st.selectbox("Sort By:", SORT_OPTIONS, index=0, key="main_sort")
+    sort_by = st.selectbox("Sort Matrix By:", SORT_OPTIONS, index=0, key="main_sort")
 
 # -----------------------
 # Assignment Cards Grid (User Isolated)
@@ -1270,7 +1288,7 @@ if search_q:
 df = sort_df(df, sort_by)
 
 if df.empty:
-    st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found, enjoy.</div>", unsafe_allow_html=True)
+    st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found — your matrix is clear.</div>", unsafe_allow_html=True)
 else:
     cards_per_row = 3
     chunked_rows = [df.iloc[i:i + cards_per_row] for i in range(0, len(df), cards_per_row)]
