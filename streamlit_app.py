@@ -1,9 +1,11 @@
 """
-Assignment Tracker — Single-Table Supabase Sync (`assignments` only)
+Assignment Tracker — 100% Supabase Cloud Persistent (Single Table)
 
-Features:
-- Native integration with single Supabase `assignments` table schema (id, user_id, title, course, due_date, status, notes, created_at, priority, atype, eta)
-- 100% full-width dark theme with hidden sidebar and responsive multi-device layout (UI completely preserved)
+Fixes:
+- Stores user class schedules directly in Supabase Cloud via system config records in `assignments`
+- Prevents the "Welcome! Setup Your Classes" modal from reappearing on server restarts
+- Fully isolates per-user assignments and course lists across browsers and devices
+- 100% full-width dark theme with zero sidebar clutter
 """
 
 from __future__ import annotations
@@ -126,6 +128,11 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
         return {"error": err, "data": data, "raw": raw}
     except Exception:
         return {"error": None, "data": None, "raw": None}
+
+
+def get_courses_config_id(user_id: str) -> str:
+    """Generates a deterministic RFC UUID for the user's Cloud Course Config record."""
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_courses_config_{user_id}"))
 
 
 def _pack_notes(notes_text: str, prev_status: str) -> str:
@@ -305,7 +312,7 @@ def current_user() -> Optional[Dict[str, Any]]:
 
 
 # -----------------------
-# Single-Table Persistence Helpers (Mapped to Supabase Columns)
+# Supabase Cloud & Local Persistence Helpers
 # -----------------------
 def invalidate_cache():
     if "df_cached" in st.session_state:
@@ -332,44 +339,74 @@ def _write_data_file(rows: List[Dict[str, Any]]) -> None:
 
 
 def _read_courses_file(user_id: str) -> List[str]:
-    courses_set = set()
+    """Reads course list directly from Supabase Cloud `assignments` table."""
+    courses_list = []
+    cfg_id = get_courses_config_id(user_id)
 
-    if COURSES_FILE.exists() and user_id:
+    # 1. Primary: Read from Supabase Cloud System Record
+    if sb and user_id:
+        try:
+            res = sb.table("assignments").select("notes").eq("id", cfg_id).execute()
+            if res and hasattr(res, "data") and res.data:
+                raw_notes = res.data[0].get("notes")
+                if raw_notes:
+                    parsed = json.loads(raw_notes)
+                    if isinstance(parsed, list):
+                        courses_list = parsed
+        except Exception:
+            pass
+
+    # 2. Secondary: Extract from existing user assignments in Supabase
+    if not courses_list and sb and user_id:
+        try:
+            res = sb.table("assignments").select("course").eq("user_id", user_id).neq("title", "__SYSTEM_COURSES__").execute()
+            if res and hasattr(res, "data") and res.data:
+                c_set = set()
+                for r in res.data:
+                    c = r.get("course")
+                    if isinstance(c, str) and c.strip() and c != "CONFIG":
+                        c_set.add(c.strip().upper())
+                courses_list = sorted(list(c_set))
+        except Exception:
+            pass
+
+    # 3. Local JSON Fallback
+    if not courses_list and COURSES_FILE.exists() and user_id:
         try:
             with COURSES_FILE.open("r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    courses_set.update(data.get(user_id, []))
+                    courses_list = data.get(user_id, [])
                 elif isinstance(data, list):
-                    courses_set.update(data)
+                    courses_list = data
         except Exception:
             pass
 
-    if sb and user_id:
-        try:
-            res = sb.table("assignments").select("course").eq("user_id", user_id).execute()
-            if res and hasattr(res, "data") and res.data:
-                for r in res.data:
-                    c = r.get("course")
-                    if isinstance(c, str) and c.strip():
-                        courses_set.add(c.strip().upper())
-                    elif isinstance(c, list):
-                        for item in c:
-                            if isinstance(item, str) and item.strip():
-                                courses_set.add(item.strip().upper())
-                    elif isinstance(c, dict):
-                        val = c.get("name") or c.get("title")
-                        if val:
-                            courses_set.add(str(val).strip().upper())
-        except Exception:
-            pass
-
-    return sorted(list(courses_set))
+    return courses_list
 
 
 def _write_courses_file(user_id: str, courses: List[str]) -> None:
+    """Saves course list directly to Supabase Cloud `assignments` table."""
     if not user_id:
         return
+
+    cfg_id = get_courses_config_id(user_id)
+
+    # 1. Save to Supabase Cloud as a system config row in assignments
+    if sb:
+        try:
+            sb.table("assignments").upsert({
+                "id": cfg_id,
+                "user_id": user_id,
+                "title": "__SYSTEM_COURSES__",
+                "course": "CONFIG",
+                "notes": json.dumps(courses),
+                "created_at": datetime.utcnow().isoformat()
+            }).execute()
+        except Exception:
+            pass
+
+    # 2. Save to local disk fallback
     try:
         all_courses = {}
         if COURSES_FILE.exists():
@@ -388,13 +425,17 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
 
 
 def fetch_assignments(user_id: str) -> pd.DataFrame:
-    """Fetches assignments directly from `assignments` table using native columns."""
+    """Fetches user assignments from Supabase Cloud (filtering out config records)."""
+    cfg_id = get_courses_config_id(user_id)
     rows = []
+
     if sb and user_id:
         try:
-            res = sb.table("assignments").select("*").eq("user_id", user_id).execute()
+            res = sb.table("assignments").select("*").eq("user_id", user_id).neq("title", "__SYSTEM_COURSES__").execute()
             if res and hasattr(res, "data") and res.data:
                 for r in res.data:
+                    if str(r.get("id")) == cfg_id:
+                        continue
                     n_text, prev_st = _unpack_notes(r.get("notes"))
                     raw_course = r.get("course")
                     
@@ -428,7 +469,7 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
         local_rows = _read_data_file()
         if isinstance(local_rows, list):
             for r in local_rows:
-                if str(r.get("user_id")) == str(user_id):
+                if str(r.get("user_id")) == str(user_id) and r.get("title") != "__SYSTEM_COURSES__":
                     n_text, prev_st = _unpack_notes(r.get("notes"))
                     rows.append({
                         "id": str(r.get("id")),
@@ -456,7 +497,7 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
 
 
 def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
-    """Upserts directly into `assignments` table using native Supabase columns."""
+    """Upserts assignments directly into Supabase Cloud `assignments` table."""
     db_rows = []
     for r in rows_to_upsert:
         n_text = r.get("notes", "")
@@ -513,20 +554,18 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Real-Time Callback Handlers (Session State Memory Bound)
+# Real-Time Callback Handlers
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     chk_val = st.session_state.get(f"chk_done_{aid}", False)
     
     if chk_val:
-        # Checkbox ticked: store current status as previous before turning Done
         current_st = row_dict.get("status", "Not Started")
         if current_st != "Done":
             row_dict["prev_status"] = current_st
             st.session_state[f"prev_st_{aid}"] = current_st
         new_status = "Done"
     else:
-        # Checkbox unticked: pull stored previous status from session memory
         prev_st = st.session_state.get(f"prev_st_{aid}") or row_dict.get("prev_status", "In Progress")
         if prev_st == "Done" or not prev_st:
             prev_st = "In Progress"
@@ -1012,10 +1051,12 @@ def show_auth_dialog():
             elif not user_obj:
                 valid_uuid_string = str(uuid.uuid5(uuid.NAMESPACE_DNS, email_val))
                 st.session_state.user = {"id": valid_uuid_string, "email": email_val}
+                invalidate_cache()
                 safe_rerun()
             else:
                 st.session_state.user = user_obj
                 u_id = str(user_obj.get("id") or user_obj.get("sub") or str(uuid.uuid4()))
+                invalidate_cache()
                 if not _read_courses_file(u_id):
                     st.session_state["_show_welcome_courses_modal"] = True
                 safe_rerun()
@@ -1313,7 +1354,6 @@ else:
                     due_text = format_mdy(due_d)
                     days_text, _ = days_left(due_d)
                     
-                    # Sync initial status from row or active session state memory
                     status = st.session_state.get(f"status_sel_{aid}") or row.get("status") or "Not Started"
                     priority = row.get("priority") or "Low"
                     row_dict = row.to_dict()
