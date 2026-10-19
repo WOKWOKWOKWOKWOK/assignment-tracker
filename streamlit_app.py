@@ -2,10 +2,10 @@
 Assignment Tracker — 100% Supabase Cloud Persistent (Single Table)
 
 Fixes:
-- Stores user class schedules directly in Supabase Cloud via system config records in `assignments`
-- Prevents the "Welcome! Setup Your Classes" modal from reappearing on server restarts
-- Fully isolates per-user assignments and course lists across browsers and devices
-- 100% full-width dark theme with zero sidebar clutter
+- Explicit error reporting for Supabase API calls (no silent failovers)
+- Persistent cloud storage for class schedules via system records in `assignments`
+- Complete data survival across Streamlit Cloud restarts and server reboots
+- Full dark theme UI with hidden sidebar and responsive multi-device layout
 """
 
 from __future__ import annotations
@@ -403,8 +403,8 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
                 "notes": json.dumps(courses),
                 "created_at": datetime.utcnow().isoformat()
             }).execute()
-        except Exception:
-            pass
+        except Exception as err:
+            st.error(f"Supabase write error: {err}")
 
     # 2. Save to local disk fallback
     try:
@@ -462,8 +462,8 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
                         "notes": n_text,
                         "prev_status": prev_st
                     })
-        except Exception:
-            rows = []
+        except Exception as err:
+            st.error(f"Supabase fetch error: {err}")
 
     if not rows:
         local_rows = _read_data_file()
@@ -527,8 +527,8 @@ def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
     if sb:
         try:
             sb.table("assignments").upsert(db_rows).execute()
-        except Exception:
-            pass
+        except Exception as err:
+            st.error(f"Supabase upsert error: {err}")
 
     all_rows = _read_data_file()
     by_id = {r.get("id"): r for r in all_rows if isinstance(r, dict)}
@@ -545,8 +545,8 @@ def delete_assignment(assignment_id: str) -> None:
     if sb:
         try:
             sb.table("assignments").delete().eq("id", assignment_id).execute()
-        except Exception:
-            pass
+        except Exception as err:
+            st.error(f"Supabase delete error: {err}")
 
     rows = _read_data_file()
     remaining = [r for r in rows if r.get("id") != assignment_id]
