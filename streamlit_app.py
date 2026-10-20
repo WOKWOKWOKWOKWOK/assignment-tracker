@@ -1,13 +1,3 @@
-"""
-Assignment Tracker — 100% Supabase Cloud Persistent (Single Table)
-
-Fixes:
-- Explicit error reporting for Supabase API calls (no silent failovers)
-- Persistent cloud storage for class schedules via system records in `assignments`
-- Complete data survival across Streamlit Cloud restarts and server reboots
-- Full dark theme UI with hidden sidebar and responsive multi-device layout
-"""
-
 from __future__ import annotations
 
 import json
@@ -19,8 +9,23 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
+# -----------------------
+# App config
+# -----------------------
+DATA_FILE = Path("data.json")
+COURSES_FILE = Path("courses.json")
+DEFAULT_DOMAIN = "@simsburyschools.net"
 
-# Hide Streamlit top toolbar, header, and footer/manage app overlay
+STATUS_OPTIONS = ["Not Started", "In Progress", "Done"]
+PRIORITY_OPTIONS = ["Low", "Medium", "High"]
+TYPE_OPTIONS = ["Essay", "Presentation", "Homework", "Test & Quizzes", "Other"]
+SORT_OPTIONS = [
+    "Spreadsheet Default Order",
+    "Due Date (Soonest)",
+    "Priority (High → Low)",
+    "Created (Newest)",
+]
+
 hide_streamlit_elements = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -39,39 +44,6 @@ except Exception:
     Client = None
     create_client = None  # type: ignore
 
-# -----------------------
-# Streamlit Rerun & Dialog Helper
-# -----------------------
-def safe_rerun() -> None:
-    """Universal rerun helper compatible across Streamlit versions."""
-    if hasattr(st, "rerun"):
-        st.rerun()
-    elif hasattr(st, "experimental_rerun"):
-        st.experimental_rerun()
-
-
-# Safe Modal Decorator Setup
-if hasattr(st, "dialog"):
-    dialog_decorator = st.dialog
-elif hasattr(st, "experimental_dialog"):
-    dialog_decorator = st.experimental_dialog
-else:
-    def dialog_decorator(title: str):
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                st.subheader(title)
-                return func(*args, **kwargs)
-            return wrapper
-        return decorator
-
-
-# -----------------------
-# Config / persistence
-# -----------------------
-DATA_FILE = Path("data.json")
-COURSES_FILE = Path("courses.json")
-DEFAULT_DOMAIN = "@simsburyschools.net"
-
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"]
     SUPABASE_KEY = st.secrets["supabase"]["key"]
@@ -86,22 +58,23 @@ if SUPABASE_URL and SUPABASE_KEY and create_client:
     except Exception:
         sb = None
 
-STATUS_OPTIONS = ["Not Started", "In Progress", "Done"]
-PRIORITY_OPTIONS = ["Low", "Medium", "High"]
-TYPE_OPTIONS = ["Essay", "Presentation", "Homework", "Test & Quizzes", "Other"]
-SORT_OPTIONS = [
-    "Spreadsheet Default Order",
-    "Due Date (Soonest)",
-    "Priority (High → Low)",
-    "Created (Newest)",
-]
-
-st.set_page_config(page_title="Assignment Tracker", page_icon="📋", layout="wide", initial_sidebar_state="collapsed")
-
+st.set_page_config(
+    page_title="Assignment Tracker",
+    page_icon="📋",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
 # -----------------------
-# Utility Helpers & Schema Encoding
+# Utility helpers
 # -----------------------
+def safe_rerun() -> None:
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+
+
 def _to_dict(obj: Any) -> Optional[Dict[str, Any]]:
     if obj is None:
         return None
@@ -137,108 +110,16 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
         data = getattr(res, "data", None)
         if data is None:
             mapped = _to_dict(res)
-            if isinstance(mapped, dict):
-                data = mapped
-            else:
-                data = None
+            data = mapped if isinstance(mapped, dict) else None
         raw = _to_dict(res) or None
         return {"error": err, "data": data, "raw": raw}
     except Exception:
         return {"error": None, "data": None, "raw": None}
 
 
-def get_courses_config_id(user_id: str) -> str:
-    """Generates a deterministic RFC UUID for the user's Cloud Course Config record."""
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_courses_config_{user_id}"))
-
-
-def _pack_notes(notes_text: str, prev_status: str) -> str:
-    """Packs auxiliary state cleanly into notes payload."""
-    return json.dumps({
-        "text": notes_text,
-        "prev_status": prev_status
-    })
-
-
-def _unpack_notes(raw_notes: Any) -> Tuple[str, str]:
-    """Extracts text notes and previous status with fallback."""
-    if not raw_notes:
-        return ("", "Not Started")
-    try:
-        data = json.loads(str(raw_notes))
-        if isinstance(data, dict):
-            return (
-                data.get("text", ""),
-                data.get("prev_status", "Not Started")
-            )
-    except Exception:
-        pass
-    return (str(raw_notes), "Not Started")
-
-
 # -----------------------
-# Auth Helpers (Supabase)
+# Supabase auth
 # -----------------------
-def sign_up(email: str, password: str) -> Dict[str, Any]:
-    auth = getattr(sb, "auth", None) if sb else None
-    if auth is None:
-        return {"error": "sb.auth not available", "data": None}
-    try:
-        if hasattr(auth, "sign_up"):
-            try:
-                res = auth.sign_up({"email": email, "password": password})
-            except TypeError:
-                res = auth.sign_up(email=email, password=password)
-        elif hasattr(auth, "sign_up_with_password"):
-            try:
-                res = auth.sign_up_with_password({"email": email, "password": password})
-            except TypeError:
-                res = auth.sign_up_with_password(email=email, password=password)
-        else:
-            return {"error": "No supported sign-up method found", "data": None}
-        return _wrap_result(res)
-    except Exception as e:
-        return {"error": str(e), "data": None}
-
-
-def sign_in(email: str, password: str) -> Dict[str, Any]:
-    auth = getattr(sb, "auth", None) if sb else None
-    if auth is None:
-        return {"error": "sb.auth not available", "data": None}
-    try:
-        if hasattr(auth, "sign_in_with_password"):
-            try:
-                res = auth.sign_in_with_password({"email": email, "password": password})
-            except TypeError:
-                res = auth.sign_in_with_password(email=email, password=password)
-        elif hasattr(auth, "sign_in"):
-            try:
-                res = auth.sign_in({"email": email, "password": password})
-            except TypeError:
-                res = auth.sign_in(email=email, password=password)
-        else:
-            return {"error": "No supported sign-in method found", "data": None}
-        return _wrap_result(res)
-    except Exception as e:
-        return {"error": str(e), "data": None}
-
-
-def sign_out() -> None:
-    try:
-        auth = getattr(sb, "auth", None) if sb else None
-        if auth is not None and hasattr(auth, "sign_out"):
-            try:
-                auth.sign_out()
-            except Exception:
-                pass
-    except Exception:
-        pass
-    for key in ["user", "df_cached"]:
-        if key in st.session_state:
-            del st.session_state[key]
-    safe_rerun()
-
-
 def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
     if response is None:
         return None
@@ -304,6 +185,66 @@ def extract_user_from_auth_response(response: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def sign_up(email: str, password: str) -> Dict[str, Any]:
+    auth = getattr(sb, "auth", None) if sb else None
+    if auth is None:
+        return {"error": "sb.auth not available", "data": None}
+    try:
+        if hasattr(auth, "sign_up"):
+            try:
+                res = auth.sign_up({"email": email, "password": password})
+            except TypeError:
+                res = auth.sign_up(email=email, password=password)
+        elif hasattr(auth, "sign_up_with_password"):
+            try:
+                res = auth.sign_up_with_password({"email": email, "password": password})
+            except TypeError:
+                res = auth.sign_up_with_password(email=email, password=password)
+        else:
+            return {"error": "No supported sign-up method found", "data": None}
+        return _wrap_result(res)
+    except Exception as exc:
+        return {"error": str(exc), "data": None}
+
+
+def sign_in(email: str, password: str) -> Dict[str, Any]:
+    auth = getattr(sb, "auth", None) if sb else None
+    if auth is None:
+        return {"error": "sb.auth not available", "data": None}
+    try:
+        if hasattr(auth, "sign_in_with_password"):
+            try:
+                res = auth.sign_in_with_password({"email": email, "password": password})
+            except TypeError:
+                res = auth.sign_in_with_password(email=email, password=password)
+        elif hasattr(auth, "sign_in"):
+            try:
+                res = auth.sign_in({"email": email, "password": password})
+            except TypeError:
+                res = auth.sign_in(email=email, password=password)
+        else:
+            return {"error": "No supported sign-in method found", "data": None}
+        return _wrap_result(res)
+    except Exception as exc:
+        return {"error": str(exc), "data": None}
+
+
+def sign_out() -> None:
+    try:
+        auth = getattr(sb, "auth", None) if sb else None
+        if auth is not None and hasattr(auth, "sign_out"):
+            try:
+                auth.sign_out()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    for key in ["user", "df_cached"]:
+        if key in st.session_state:
+            del st.session_state[key]
+    safe_rerun()
+
+
 def current_user() -> Optional[Dict[str, Any]]:
     try:
         auth = getattr(sb, "auth", None) if sb else None
@@ -317,8 +258,8 @@ def current_user() -> Optional[Dict[str, Any]]:
     try:
         auth = getattr(sb, "auth", None) if sb else None
         if auth is not None and hasattr(auth, "get_user"):
-            resp = auth.get_user()
-            user = extract_user_from_auth_response(resp)
+            session = auth.get_user()
+            user = extract_user_from_auth_response(session)
             if user:
                 return user
     except Exception:
@@ -329,9 +270,13 @@ def current_user() -> Optional[Dict[str, Any]]:
 
 
 # -----------------------
-# Supabase Cloud & Local Persistence Helpers
+# Local persistence helpers
 # -----------------------
-def invalidate_cache():
+def get_courses_config_id(user_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_courses_config_{user_id}"))
+
+
+def invalidate_cache() -> None:
     if "df_cached" in st.session_state:
         del st.session_state["df_cached"]
 
@@ -356,8 +301,7 @@ def _write_data_file(rows: List[Dict[str, Any]]) -> None:
 
 
 def _read_courses_file(user_id: str) -> List[str]:
-    """Reads course list directly from Supabase Cloud `assignments` table."""
-    courses_list = []
+    courses_list: List[str] = []
     cfg_id = get_courses_config_id(user_id)
 
     if sb and user_id:
@@ -365,10 +309,10 @@ def _read_courses_file(user_id: str) -> List[str]:
             res = sb.table("assignments").select("notes").eq("id", cfg_id).execute()
             if res and hasattr(res, "data") and res.data:
                 raw_notes = res.data[0].get("notes")
-                if raw_notes:
+                if raw_notes is not None:
                     parsed = json.loads(raw_notes)
                     if isinstance(parsed, list):
-                        courses_list = parsed
+                        courses_list = [str(x).strip().upper() for x in parsed if str(x).strip()]
         except Exception:
             pass
 
@@ -377,11 +321,11 @@ def _read_courses_file(user_id: str) -> List[str]:
             res = sb.table("assignments").select("course").eq("user_id", user_id).neq("title", "__SYSTEM_COURSES__").execute()
             if res and hasattr(res, "data") and res.data:
                 c_set = set()
-                for r in res.data:
-                    c = r.get("course")
+                for item in res.data:
+                    c = item.get("course")
                     if isinstance(c, str) and c.strip() and c != "CONFIG":
                         c_set.add(c.strip().upper())
-                courses_list = sorted(list(c_set))
+                courses_list = sorted(c_set)
         except Exception:
             pass
 
@@ -390,9 +334,9 @@ def _read_courses_file(user_id: str) -> List[str]:
             with COURSES_FILE.open("r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    courses_list = data.get(user_id, [])
+                    courses_list = [str(x).strip().upper() for x in data.get(user_id, []) if str(x).strip()]
                 elif isinstance(data, list):
-                    courses_list = data
+                    courses_list = [str(x).strip().upper() for x in data if str(x).strip()]
         except Exception:
             pass
 
@@ -400,7 +344,6 @@ def _read_courses_file(user_id: str) -> List[str]:
 
 
 def _write_courses_file(user_id: str, courses: List[str]) -> None:
-    """Saves course list directly to Supabase Cloud `assignments` table."""
     if not user_id:
         return
 
@@ -414,13 +357,13 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
                 "title": "__SYSTEM_COURSES__",
                 "course": "CONFIG",
                 "notes": json.dumps(courses),
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.utcnow().isoformat(),
             }).execute()
-        except Exception as err:
-            st.error(f"Supabase write error: {err}")
+        except Exception as exc:
+            st.error(f"Supabase write error: {exc}")
 
     try:
-        all_courses = {}
+        all_courses: Dict[str, List[str]] = {}
         if COURSES_FILE.exists():
             try:
                 with COURSES_FILE.open("r", encoding="utf-8") as f:
@@ -429,218 +372,27 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
                         all_courses = existing
             except Exception:
                 all_courses = {}
-        all_courses[user_id] = courses
+        all_courses[user_id] = [str(x).strip().upper() for x in courses if str(x).strip()]
         with COURSES_FILE.open("w", encoding="utf-8") as f:
             json.dump(all_courses, f, indent=2)
     except Exception:
         pass
 
 
-def fetch_assignments(user_id: str) -> pd.DataFrame:
-    """Fetches user assignments from Supabase Cloud (filtering out config records)."""
-    cfg_id = get_courses_config_id(user_id)
-    rows = []
-
-    if sb and user_id:
-        try:
-            res = sb.table("assignments").select("*").eq("user_id", user_id).neq("title", "__SYSTEM_COURSES__").execute()
-            if res and hasattr(res, "data") and res.data:
-                for r in res.data:
-                    if str(r.get("id")) == cfg_id:
-                        continue
-
-                    n_text, prev_st = _unpack_notes(r.get("notes"))
-                    raw_course = r.get("course")
-
-                    if isinstance(raw_course, list) and len(raw_course) > 0:
-                        course_str = str(raw_course[0])
-                    elif isinstance(raw_course, dict):
-                        course_str = str(raw_course.get("name") or raw_course.get("title") or "GENERAL")
-                    elif isinstance(raw_course, str):
-                        course_str = raw_course
-                    else:
-                        course_str = str(raw_course) if raw_course else "GENERAL"
-
-                    rows.append({
-                        "id": str(r.get("id")),
-                        "user_id": str(r.get("user_id")),
-                        "title": r.get("title") or "",
-                        "course": course_str.strip().upper(),
-                        "due_date": r.get("due_date") or "",
-                        "status": r.get("status") or "Not Started",
-                        "priority": r.get("priority") or "Medium",
-                        "atype": r.get("atype") or "Homework",
-                        "eta": r.get("eta") or "",
-                        "created_at": r.get("created_at") or "",
-                        "notes": n_text,
-                        "prev_status": prev_st
-                    })
-        except Exception as err:
-            st.error(f"Supabase fetch error: {err}")
-
-    if not rows:
-        local_rows = _read_data_file()
-        if isinstance(local_rows, list):
-            for r in local_rows:
-                if str(r.get("user_id")) == str(user_id) and r.get("title") != "__SYSTEM_COURSES__":
-                    n_text, prev_st = _unpack_notes(r.get("notes"))
-                    rows.append({
-                        "id": str(r.get("id")),
-                        "user_id": str(r.get("user_id")),
-                        "title": r.get("title") or "",
-                        "course": str(r.get("course") or "GENERAL").strip().upper(),
-                        "due_date": r.get("due_date") or "",
-                        "status": r.get("status") or "Not Started",
-                        "priority": r.get("priority") or "Medium",
-                        "atype": r.get("atype") or "Homework",
-                        "eta": r.get("eta") or "",
-                        "created_at": r.get("created_at") or "",
-                        "notes": n_text,
-                        "prev_status": prev_st
-                    })
-
-    if not rows:
-        return pd.DataFrame(columns=[
-            "id", "user_id", "title", "course", "due_date", "status", "priority",
-            "atype", "eta", "created_at", "notes", "prev_status"
-        ])
-
-    df = pd.DataFrame(rows)
-    for c in [
-        "id", "user_id", "title", "course", "due_date", "status", "priority",
-        "atype", "eta", "created_at", "notes", "prev_status"
-    ]:
-        if c not in df.columns:
-            df[c] = ""
-    return df
-
-
-def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
-    """Upserts assignments directly into Supabase Cloud `assignments` table while preserving notes and eta."""
-    if not rows_to_upsert:
-        return
-
-    all_rows = _read_data_file()
-    by_id = {r.get("id"): r for r in all_rows if isinstance(r, dict) and r.get("id") is not None}
-
-    for row in rows_to_upsert:
-        rid = row.get("id")
-        clean = dict(row)
-
-        clean["title"] = str(clean.get("title", "")).strip() or "Untitled Assignment"
-        clean["course"] = str(clean.get("course", "GENERAL")).strip() or "GENERAL"
-        clean["status"] = clean.get("status", "Not Started")
-        clean["priority"] = clean.get("priority", "Medium")
-        clean["atype"] = clean.get("atype", "Homework")
-        clean["eta"] = str(clean.get("eta", "")).strip()
-        clean["notes"] = str(clean.get("notes", "")).strip()
-        clean["prev_status"] = clean.get("prev_status", "Not Started")
-        clean["user_id"] = clean.get("user_id", "")
-        clean["created_at"] = clean.get("created_at") or datetime.utcnow().isoformat()
-
-        if rid in by_id:
-            existing = by_id[rid]
-            if isinstance(existing, dict):
-                for key, value in clean.items():
-                    if value is not None:
-                        existing[key] = value
-            by_id[rid] = existing
-        else:
-            by_id[rid] = clean
-
-        db_row = {
-            "id": rid,
-            "user_id": clean.get("user_id"),
-            "title": clean.get("title"),
-            "course": clean.get("course"),
-            "due_date": clean.get("due_date") or None,
-            "status": clean.get("status"),
-            "priority": clean.get("priority"),
-            "atype": clean.get("atype"),
-            "eta": clean.get("eta"),
-            "notes": _pack_notes(clean.get("notes", ""), clean.get("prev_status", "Not Started")),
-            "created_at": clean.get("created_at"),
-        }
-
-        if sb:
-            try:
-                sb.table("assignments").upsert(db_row).execute()
-            except Exception as err:
-                st.error(f"Supabase upsert error: {err}")
-
-    _write_data_file(list(by_id.values()))
-
-
-def delete_assignment(assignment_id: str) -> None:
-    if sb:
-        try:
-            sb.table("assignments").delete().eq("id", assignment_id).execute()
-        except Exception as err:
-            st.error(f"Supabase delete error: {err}")
-
-    rows = _read_data_file()
-    remaining = [r for r in rows if r.get("id") != assignment_id]
-    _write_data_file(remaining)
-
-
-# -----------------------
-# Real-Time Callback Handlers
-# -----------------------
-def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
-    chk_val = st.session_state.get(f"chk_done_{aid}", False)
-
-    if chk_val:
-        current_st = row_dict.get("status", "Not Started")
-        if current_st != "Done":
-            row_dict["prev_status"] = current_st
-            st.session_state[f"prev_st_{aid}"] = current_st
-        new_status = "Done"
-    else:
-        prev_st = st.session_state.get(f"prev_st_{aid}") or row_dict.get("prev_status", "In Progress")
-        if prev_st == "Done" or not prev_st:
-            prev_st = "In Progress"
-        new_status = prev_st
-
-    row_dict["status"] = new_status
-    st.session_state[f"status_sel_{aid}"] = new_status
-    upsert_assignments([row_dict])
-
-
-def on_status_change(aid: str, row_dict: Dict[str, Any]):
-    new_status = st.session_state.get(f"status_sel_{aid}")
-    if new_status:
-        if new_status != "Done":
-            row_dict["prev_status"] = new_status
-            st.session_state[f"prev_st_{aid}"] = new_status
-        row_dict["status"] = new_status
-        st.session_state[f"chk_done_{aid}"] = (new_status == "Done")
-        upsert_assignments([row_dict])
-
-
-def on_priority_change(aid: str, row_dict: Dict[str, Any]):
-    new_prio = st.session_state.get(f"prio_sel_{aid}")
-    if new_prio:
-        row_dict["priority"] = new_prio
-        upsert_assignments([row_dict])
-
-
-# -----------------------
-# Date / Sort Helpers
-# -----------------------
-def parse_date_iso_or_empty(s: Any) -> Optional[date]:
-    if s is None:
+def parse_date_iso_or_empty(value: Any) -> Optional[date]:
+    if value is None:
         return None
-    if isinstance(s, date):
-        return s
-    if isinstance(s, datetime):
-        return s.date()
-    if isinstance(s, str):
-        s = s.strip()
-        if not s:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
             return None
         for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y"):
             try:
-                return datetime.strptime(s, fmt).date()
+                return datetime.strptime(value, fmt).date()
             except Exception:
                 pass
     return None
@@ -668,25 +420,192 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
     if df.empty:
         return df
     if sort_by == "Due Date (Soonest)":
+        df = df.copy()
         df["due_parsed"] = df["due_date"].apply(parse_date_iso_or_empty)
         return df.sort_values(by=["due_parsed"], na_position="last").drop(columns=["due_parsed"])
     if sort_by == "Priority (High → Low)":
         order = {"High": 0, "Medium": 1, "Low": 2, "": 3}
+        df = df.copy()
         df["p_rank"] = df["priority"].map(lambda v: order.get(str(v), 3))
         return df.sort_values(by=["p_rank"]).drop(columns=["p_rank"])
     if sort_by == "Created (Newest)":
+        df = df.copy()
         df["created_at_parsed"] = pd.to_datetime(df["created_at"], errors="coerce")
         return df.sort_values(by=["created_at_parsed"], ascending=False).drop(columns=["created_at_parsed"])
     return df
 
 
 # -----------------------
-# CSS Styling (100% Unchanged UI)
+# Assignment data layer
+# -----------------------
+def fetch_assignments(user_id: str) -> pd.DataFrame:
+    rows: List[Dict[str, Any]] = []
+    if sb and user_id:
+        try:
+            res = sb.table("assignments").select("*").eq("user_id", user_id).neq("title", "__SYSTEM_COURSES__").execute()
+            if res and hasattr(res, "data") and res.data:
+                for row in res.data:
+                    if str(row.get("id")) == get_courses_config_id(user_id):
+                        continue
+                    rows.append({
+                        "id": str(row.get("id") or uuid.uuid4()),
+                        "user_id": str(row.get("user_id") or user_id),
+                        "title": str(row.get("title") or ""),
+                        "course": str(row.get("course") or "GENERAL").strip().upper(),
+                        "due_date": row.get("due_date") or "",
+                        "status": row.get("status") or "Not Started",
+                        "priority": row.get("priority") or "Medium",
+                        "atype": row.get("atype") or "Homework",
+                        "eta": row.get("eta") or "",
+                        "notes": row.get("notes") or "",
+                        "created_at": row.get("created_at") or datetime.utcnow().isoformat(),
+                        "prev_status": row.get("prev_status") or "Not Started",
+                    })
+        except Exception as exc:
+            st.error(f"Supabase fetch error: {exc}")
+
+    if not rows:
+        local_rows = _read_data_file()
+        for row in local_rows:
+            if str(row.get("user_id")) == str(user_id) and row.get("title") != "__SYSTEM_COURSES__":
+                rows.append({
+                    "id": str(row.get("id") or uuid.uuid4()),
+                    "user_id": str(row.get("user_id") or user_id),
+                    "title": str(row.get("title") or ""),
+                    "course": str(row.get("course") or "GENERAL").strip().upper(),
+                    "due_date": row.get("due_date") or "",
+                    "status": row.get("status") or "Not Started",
+                    "priority": row.get("priority") or "Medium",
+                    "atype": row.get("atype") or "Homework",
+                    "eta": row.get("eta") or "",
+                    "notes": row.get("notes") or "",
+                    "created_at": row.get("created_at") or datetime.utcnow().isoformat(),
+                    "prev_status": row.get("prev_status") or "Not Started",
+                })
+
+    if not rows:
+        return pd.DataFrame(columns=[
+            "id", "user_id", "title", "course", "due_date", "status", "priority",
+            "atype", "eta", "notes", "created_at", "prev_status"
+        ])
+
+    df = pd.DataFrame(rows)
+    for key in [
+        "id", "user_id", "title", "course", "due_date", "status", "priority",
+        "atype", "eta", "notes", "created_at", "prev_status"
+    ]:
+        if key not in df.columns:
+            df[key] = ""
+    return df
+
+
+def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
+    db_rows = []
+    for row in rows_to_upsert:
+        db_rows.append({
+            "id": row.get("id"),
+            "user_id": row.get("user_id"),
+            "title": row.get("title", ""),
+            "course": row.get("course", "GENERAL"),
+            "due_date": row.get("due_date") or None,
+            "status": row.get("status", "Not Started"),
+            "priority": row.get("priority", "Medium"),
+            "atype": row.get("atype", "Homework"),
+            "eta": row.get("eta", ""),
+            "notes": row.get("notes", ""),
+            "prev_status": row.get("prev_status", "Not Started"),
+            "created_at": row.get("created_at") or datetime.utcnow().isoformat(),
+        })
+
+    if sb:
+        try:
+            sb.table("assignments").upsert(db_rows).execute()
+        except Exception as exc:
+            st.error(f"Supabase upsert error: {exc}")
+
+    all_rows = _read_data_file()
+    by_id = {str(r.get("id")): r for r in all_rows if isinstance(r, dict) and r.get("id") is not None}
+    for row in rows_to_upsert:
+        rid = str(row.get("id"))
+        record = {
+            "id": rid,
+            "user_id": row.get("user_id"),
+            "title": row.get("title", ""),
+            "course": row.get("course", "GENERAL"),
+            "due_date": row.get("due_date") or "",
+            "status": row.get("status", "Not Started"),
+            "priority": row.get("priority", "Medium"),
+            "atype": row.get("atype", "Homework"),
+            "eta": row.get("eta", ""),
+            "notes": row.get("notes", ""),
+            "prev_status": row.get("prev_status", "Not Started"),
+            "created_at": row.get("created_at") or datetime.utcnow().isoformat(),
+        }
+        if rid in by_id:
+            by_id[rid].update(record)
+        else:
+            by_id[rid] = record
+    _write_data_file(list(by_id.values()))
+
+
+def delete_assignment(assignment_id: str) -> None:
+    if sb:
+        try:
+            sb.table("assignments").delete().eq("id", assignment_id).execute()
+        except Exception as exc:
+            st.error(f"Supabase delete error: {exc}")
+
+    rows = _read_data_file()
+    remaining = [r for r in rows if str(r.get("id")) != str(assignment_id)]
+    _write_data_file(remaining)
+
+
+# -----------------------
+# Checkbox / status callbacks
+# -----------------------
+def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
+    chk_val = st.session_state.get(f"chk_done_{aid}", False)
+    if chk_val:
+        current_status = row_dict.get("status", "Not Started")
+        if current_status != "Done":
+            row_dict["prev_status"] = current_status
+            st.session_state[f"prev_st_{aid}"] = current_status
+        new_status = "Done"
+    else:
+        prev_st = st.session_state.get(f"prev_st_{aid}") or row_dict.get("prev_status", "In Progress")
+        if prev_st == "Done" or not prev_st:
+            prev_st = "In Progress"
+        new_status = prev_st
+
+    row_dict["status"] = new_status
+    st.session_state[f"status_sel_{aid}"] = new_status
+    upsert_assignments([row_dict])
+
+
+def on_status_change(aid: str, row_dict: Dict[str, Any]):
+    new_status = st.session_state.get(f"status_sel_{aid}")
+    if new_status:
+        if new_status != "Done":
+            row_dict["prev_status"] = new_status
+            st.session_state[f"prev_st_{aid}"] = new_status
+        row_dict["status"] = new_status
+        st.session_state[f"chk_done_{aid}"] = (new_status == "Done")
+        upsert_assignments([row_dict])
+
+
+def on_priority_change(aid: str, row_dict: Dict[str, Any]):
+    new_priority = st.session_state.get(f"prio_sel_{aid}")
+    if new_priority:
+        row_dict["priority"] = new_priority
+        upsert_assignments([row_dict])
+
+
+# -----------------------
+# Styling
 # -----------------------
 st.markdown(
     """
     <style>
-    /* Dark Theme Canvas */
     .stApp {
         background-color: #0b0f19 !important;
         color: #e2e8f0;
@@ -699,14 +618,12 @@ st.markdown(
         max-width: 1440px;
     }
 
-    /* Completely Hide Streamlit Sidebar & Sidebar Toggle Button */
     section[data-testid="stSidebar"],
     div[data-testid="collapsedControl"],
     button[data-testid="stSidebarCollapseButton"] {
         display: none !important;
     }
 
-    /* Auto-flex Grid Layout across all screens */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-wrap: wrap !important;
@@ -718,7 +635,6 @@ st.markdown(
         flex: 1 1 330px !important;
     }
 
-    /* Header Title Styling */
     .app-title {
         font-size: 2.1rem;
         font-weight: 900;
@@ -736,7 +652,6 @@ st.markdown(
         margin-top: 4px;
     }
 
-    /* Unclipped User Email Pill */
     .status-engine-pill {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -761,7 +676,6 @@ st.markdown(
         display: inline-block;
     }
 
-    /* Domain Suffix Badge Anchored Next to Input */
     .domain-badge-active {
         background-color: #1e1b4b;
         border: 1px solid #4f46e5;
@@ -781,7 +695,6 @@ st.markdown(
         color: #34d399;
     }
 
-    /* Live Email Preview Box */
     .live-email-preview {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -796,7 +709,6 @@ st.markdown(
         color: #64748b;
     }
 
-    /* Force All Streamlit Buttons To Display Unclipped Text */
     .stButton > button {
         white-space: nowrap !important;
         overflow: visible !important;
@@ -838,7 +750,6 @@ st.markdown(
         font-weight: 600 !important;
     }
 
-    /* Calendar Banner Box */
     .calendar-banner-box {
         background-color: #0f172a;
         border: 1px solid #1e293b;
@@ -851,7 +762,6 @@ st.markdown(
         margin: 16px 0 20px 0;
     }
 
-    /* Card Box Container */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
@@ -861,7 +771,6 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
-    /* Edit Button Styling inside Card */
     button[key^="edit_btn_"] {
         padding: 2px 8px !important;
         font-size: 0.8rem !important;
@@ -873,7 +782,6 @@ st.markdown(
         min-width: 58px !important;
     }
 
-    /* Circular Completion Checkbox */
     div[data-testid="stCheckbox"] {
         margin-top: 4px;
     }
@@ -886,7 +794,6 @@ st.markdown(
         cursor: pointer;
     }
 
-    /* Subject Badge Pill */
     .course-badge {
         background-color: #1e1b4b;
         color: #818cf8;
@@ -956,7 +863,6 @@ st.markdown(
         white-space: nowrap !important;
     }
 
-    /* Selectbox Overrides */
     div[data-baseweb="select"] {
         border-radius: 8px !important;
         font-size: 0.82rem !important;
@@ -969,44 +875,50 @@ st.markdown(
         white-space: nowrap !important;
     }
 
-    /* Red Badge for 'Not Started' */
-    .status-not-started div[data-baseweb=\"select\"] {
+    .status-not-started div[data-baseweb="select"] {
         background-color: #2a0812 !important;
         border: 1px solid #9f1239 !important;
         color: #fca5a5 !important;
     }
 
-    /* Amber Badge for 'In Progress' */
-    .status-in-progress div[data-baseweb=\"select\"] {
+    .status-in-progress div[data-baseweb="select"] {
         background-color: #2e1b04 !important;
         border: 1px solid #854d0e !important;
         color: #fde047 !important;
     }
 
-    /* Green Badge for 'Done' */
-    .status-done div[data-baseweb=\"select\"] {
+    .status-done div[data-baseweb="select"] {
         background-color: #032b1d !important;
         border: 1px solid #065f46 !important;
         color: #34d399 !important;
     }
 
-    /* Priority Color Accents */
-    .prio-low div[data-baseweb=\"select\"] {
+    .prio-low div[data-baseweb="select"] {
         border: 1px solid #059669 !important;
         color: #34d399 !important;
         background-color: #022c22 !important;
     }
 
-    .prio-medium div[data-baseweb=\"select\"] {
+    .prio-medium div[data-baseweb="select"] {
         border: 1px solid #d97706 !important;
         color: #fde047 !important;
         background-color: #2e1b04 !important;
     }
 
-    .prio-high div[data-baseweb=\"select\"] {
+    .prio-high div[data-baseweb="select"] {
         border: 1px solid #dc2626 !important;
         color: #fca5a5 !important;
         background-color: #2a0812 !important;
+    }
+
+    .meta-row {
+        color: #94a3b8;
+        font-size: 0.81rem;
+        margin-top: 8px;
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        white-space: pre-wrap;
     }
     </style>
     """,
@@ -1015,21 +927,30 @@ st.markdown(
 
 
 # -----------------------
-# Popup Auth Dialog Modal
+# Dialogs
 # -----------------------
+if hasattr(st, "dialog"):
+    dialog_decorator = st.dialog
+elif hasattr(st, "experimental_dialog"):
+    dialog_decorator = st.experimental_dialog
+else:
+    def dialog_decorator(title: str):
+        def decorator(func):
+            def wrapper(*args, **kwargs):
+                st.subheader(title)
+                return func(*args, **kwargs)
+            return wrapper
+        return decorator
+
+
 @dialog_decorator("Sign In / Sign Up")
 def show_auth_dialog():
     st.markdown("### 🔒 Account Authentication")
     mode = st.radio("Choose Action", ["Sign In", "Sign Up"], horizontal=True, key="auth_modal_mode")
 
     col_input, col_badge = st.columns([2.5, 1.5])
-
     with col_input:
-        raw_email_input = st.text_input(
-            "Username or Full Email",
-            key="auth_modal_email",
-            placeholder="e.g. 30guptaa"
-        )
+        raw_email_input = st.text_input("Username or Full Email", key="auth_modal_email", placeholder="e.g. 30guptaa")
 
     typed_user = raw_email_input.strip()
     has_custom_domain = "@" in typed_user
@@ -1042,15 +963,9 @@ def show_auth_dialog():
 
     if typed_user:
         resolved_email = typed_user if has_custom_domain else f"{typed_user}{DEFAULT_DOMAIN}"
-        st.markdown(
-            f'<div class="live-email-preview">📧 Full Account Email: <b>{resolved_email}</b></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div class="live-email-preview">📧 Full Account Email: <b>{resolved_email}</b></div>', unsafe_allow_html=True)
     else:
-        st.markdown(
-            f'<div class="live-email-preview muted">📧 Full Account Email: <i>username{DEFAULT_DOMAIN}</i></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div class="live-email-preview muted">📧 Full Account Email: <i>username{DEFAULT_DOMAIN}</i></div>', unsafe_allow_html=True)
 
     password = st.text_input("Password", type="password", key="auth_modal_pw")
 
@@ -1060,7 +975,6 @@ def show_auth_dialog():
             email_val = f"{email_val}{DEFAULT_DOMAIN}"
 
         password_val = password.strip()
-
         if not email_val or not password_val:
             st.error("Please enter both a username/email and a password.")
         elif mode == "Sign Up":
@@ -1080,8 +994,7 @@ def show_auth_dialog():
             if err:
                 st.error(f"Sign in failed: {err}")
             elif not user_obj:
-                valid_uuid_string = str(uuid.uuid5(uuid.NAMESPACE_DNS, email_val))
-                st.session_state.user = {"id": valid_uuid_string, "email": email_val}
+                st.session_state.user = {"id": str(uuid.uuid5(uuid.NAMESPACE_DNS, email_val)), "email": email_val}
                 invalidate_cache()
                 safe_rerun()
             else:
@@ -1093,20 +1006,15 @@ def show_auth_dialog():
                 safe_rerun()
 
 
-# -----------------------
-# Dialog Modals
-# -----------------------
 @dialog_decorator("Welcome! Setup Your Classes")
 def show_welcome_courses_dialog(user_id: str):
     st.session_state["_show_welcome_courses_modal"] = False
-
     st.markdown("### 🎓 Welcome to Assignment Tracker!")
     st.write("Please list the subjects or classes you are taking this term (comma separated or line by line):")
-
     courses_input = st.text_area(
         "Enter your classes:",
         value="MATH, SCIENCE, ENGLISH, HISTORY",
-        help="Example: MATH, SCIENCE, SPANISH, AP PHYSICS"
+        help="Example: MATH, SCIENCE, SPANISH, AP PHYSICS",
     )
 
     if st.button("Save Schedule & Start", key="save_initial_courses_btn"):
@@ -1122,8 +1030,8 @@ def show_welcome_courses_dialog(user_id: str):
 @dialog_decorator("Create New Assignment")
 def show_add_assignment_dialog(user_id: str):
     st.session_state["_open_add_modal"] = False
-
     courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+
     with st.form("add_assignment_form"):
         title = st.text_input("Assignment Name", key="add_title")
         course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key="add_course_choice")
@@ -1134,9 +1042,9 @@ def show_add_assignment_dialog(user_id: str):
         atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
         eta = st.text_input("Estimated Duration (e.g., 30 mins)", key="add_eta")
         notes = st.text_area("Notes", value="", key="add_notes")
-        submitted_add = st.form_submit_button("Add Assignment")
+        submitted = st.form_submit_button("Add Assignment")
 
-        if submitted_add:
+        if submitted:
             course_val = (course_free.strip() or course_choice or "GENERAL").upper()
             new_row = {
                 "id": str(uuid.uuid4()),
@@ -1148,8 +1056,8 @@ def show_add_assignment_dialog(user_id: str):
                 "priority": priority,
                 "atype": atype,
                 "eta": eta.strip(),
-                "created_at": datetime.utcnow().isoformat(),
                 "notes": notes.strip(),
+                "created_at": datetime.utcnow().isoformat(),
                 "prev_status": status if status != "Done" else "Not Started",
             }
             upsert_assignments([new_row])
@@ -1164,8 +1072,8 @@ def show_add_assignment_dialog(user_id: str):
 @dialog_decorator("Edit Assignment Details")
 def show_edit_assignment_dialog(user_id: str, aid: str):
     df_current = fetch_assignments(user_id)
-    assignment = df_current[df_current["id"] == aid].to_dict(orient="records") if not df_current.empty else []
-    assignment_record = assignment[0] if assignment else None
+    matching = df_current[df_current["id"] == aid].to_dict(orient="records") if not df_current.empty else []
+    assignment_record = matching[0] if matching else None
 
     if not assignment_record:
         st.session_state["_edit_assignment_id"] = ""
@@ -1173,8 +1081,8 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
         return
 
     st.session_state["_edit_assignment_id"] = ""
-
     courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+
     with st.form("edit_assignment_form"):
         title = st.text_input("Assignment Name", value=assignment_record.get("title", ""), key=f"edit_title_{aid}")
         course_choice = st.selectbox(
@@ -1207,10 +1115,10 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
         eta = st.text_input("Estimated Duration", value=assignment_record.get("eta", ""), key=f"edit_eta_{aid}")
         notes = st.text_area("Notes", value=assignment_record.get("notes", ""), key=f"edit_notes_{aid}")
 
-        c_save, c_del = st.columns([1, 1])
-        with c_save:
+        col_save, col_del = st.columns([1, 1])
+        with col_save:
             updated_click = st.form_submit_button("Save Changes")
-        with c_del:
+        with col_del:
             delete_click = st.form_submit_button("🗑️ Delete Assignment")
 
         if updated_click:
@@ -1218,7 +1126,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
             updated = {
                 "id": aid,
                 "user_id": user_id,
-                "title": title.strip(),
+                "title": title.strip() or "Untitled Assignment",
                 "course": course_val.strip(),
                 "due_date": due.isoformat() if isinstance(due, date) else None,
                 "status": status,
@@ -1240,10 +1148,9 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
 @dialog_decorator("Manage / Change Courses")
 def show_manage_courses_dialog(user_id: str):
     st.session_state["_open_manage_courses"] = False
-
     st.subheader("📚 Your Active Classes")
     courses = _read_courses_file(user_id)
-    to_remove = []
+    to_remove: List[str] = []
 
     if courses:
         for i, c in enumerate(courses):
@@ -1264,10 +1171,10 @@ def show_manage_courses_dialog(user_id: str):
     st.markdown("---")
     new_course = st.text_input("Add a new course", key="new_course_field", placeholder="e.g. AP CALCULUS")
     if st.button("Add Course", key="add_course_button"):
-        v = new_course.strip().upper()
-        if v:
-            if v not in courses:
-                courses.append(v)
+        value = new_course.strip().upper()
+        if value:
+            if value not in courses:
+                courses.append(value)
                 _write_courses_file(user_id, courses)
                 safe_rerun()
             else:
@@ -1275,10 +1182,9 @@ def show_manage_courses_dialog(user_id: str):
 
 
 # -----------------------
-# Auth Session Management
+# Auth session
 # -----------------------
 user = current_user()
-
 if not user:
     show_auth_dialog()
     st.stop()
@@ -1289,9 +1195,6 @@ email = user.get("email") or (user.get("user_metadata") or {}).get("email") or "
 if not _read_courses_file(user_id) and "_show_welcome_courses_modal" not in st.session_state:
     st.session_state["_show_welcome_courses_modal"] = True
 
-# -----------------------
-# State Flags & Safe Dialog Launchers
-# -----------------------
 if "_open_add_modal" not in st.session_state:
     st.session_state["_open_add_modal"] = False
 if "_open_manage_courses" not in st.session_state:
@@ -1301,18 +1204,15 @@ if "_edit_assignment_id" not in st.session_state:
 
 if st.session_state.get("_show_welcome_courses_modal", False):
     show_welcome_courses_dialog(user_id)
-
 if st.session_state.get("_open_add_modal", False):
     show_add_assignment_dialog(user_id)
-
 if st.session_state.get("_edit_assignment_id"):
     show_edit_assignment_dialog(user_id, st.session_state["_edit_assignment_id"])
-
 if st.session_state.get("_open_manage_courses", False):
     show_manage_courses_dialog(user_id)
 
 # -----------------------
-# Top Header Bar (Full Width & Unclipped Email Display)
+# Header
 # -----------------------
 col_header_left, col_header_right = st.columns([1.0, 4.0])
 
@@ -1334,8 +1234,8 @@ with col_header_right:
             df_active = fetch_assignments(user_id)
             if not df_active.empty:
                 done_ids = df_active[df_active["status"] == "Done"]["id"].tolist()
-                for aid in done_ids:
-                    delete_assignment(aid)
+                for assignment_id in done_ids:
+                    delete_assignment(assignment_id)
             safe_rerun()
     with btn_col2:
         if st.button("➕ Add Assignment", key="toolbar_add"):
@@ -1349,22 +1249,16 @@ with col_header_right:
         if st.button("🚪 Sign Out", key="toolbar_signout"):
             sign_out()
     with btn_col5:
-        st.markdown(
-            f'<div class="status-engine-pill"><span class="green-dot"></span> {email}</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div class="status-engine-pill"><span class="green-dot"></span> {email}</div>', unsafe_allow_html=True)
 
 # -----------------------
-# Calendar Banner Box
+# Date banner
 # -----------------------
 today_str = datetime.today().strftime("%A, %B %d, %Y")
-st.markdown(
-    f'<div class="calendar-banner-box">📅 Today\'s Date: {today_str}</div>',
-    unsafe_allow_html=True,
-)
+st.markdown(f'<div class="calendar-banner-box">📅 Today\'s Date: {today_str}</div>', unsafe_allow_html=True)
 
 # -----------------------
-# Search & Sort Toolbar
+# Search / sort
 # -----------------------
 col_search, col_sort = st.columns([3, 1.5])
 with col_search:
@@ -1373,7 +1267,7 @@ with col_sort:
     sort_by = st.selectbox("Sort By:", SORT_OPTIONS, index=0, key="main_sort")
 
 # -----------------------
-# Assignment Cards Grid (User Isolated)
+# Cards
 # -----------------------
 if "df_cached" not in st.session_state:
     st.session_state.df_cached = fetch_assignments(user_id)
@@ -1382,7 +1276,12 @@ df = st.session_state.df_cached.copy()
 
 if search_q:
     q = search_q.lower()
-    df = df[df.apply(lambda r: q in str(r.get("title", "")).lower() or q in str(r.get("course", "")).lower() or q in str(r.get("atype", "")).lower(), axis=1)]
+    df = df[df.apply(
+        lambda r: q in str(r.get("title", "")).lower()
+        or q in str(r.get("course", "")).lower()
+        or q in str(r.get("atype", "")).lower(),
+        axis=1,
+    )]
 
 df = sort_df(df, sort_by)
 
@@ -1390,11 +1289,10 @@ if df.empty:
     st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found, enjoy.</div>", unsafe_allow_html=True)
 else:
     cards_per_row = 3
-    chunked_rows = [df.iloc[i:i + cards_per_row] for i in range(0, len(df), cards_per_row)]
-
-    for row_df in chunked_rows:
+    rows = [df.iloc[i:i + cards_per_row] for i in range(0, len(df), cards_per_row)]
+    for row_group in rows:
         cols = st.columns(cards_per_row)
-        for idx, (_, row) in enumerate(row_df.iterrows()):
+        for idx, (_, row) in enumerate(row_group.iterrows()):
             with cols[idx]:
                 with st.container(border=True):
                     aid = row.get("id")
@@ -1404,9 +1302,10 @@ else:
                     due_d = parse_date_iso_or_empty(row.get("due_date"))
                     due_text = format_mdy(due_d)
                     days_text, _ = days_left(due_d)
-
                     status = st.session_state.get(f"status_sel_{aid}") or row.get("status") or "Not Started"
                     priority = row.get("priority") or "Low"
+                    eta = str(row.get("eta") or "").strip()
+                    notes = str(row.get("notes") or "").strip()
                     row_dict = row.to_dict()
 
                     status_class = "status-not-started"
@@ -1422,37 +1321,31 @@ else:
                         prio_class = "prio-high"
 
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
-
                     with c_top1:
-                        chk_key = f"chk_done_{aid}"
                         st.checkbox(
                             "Done",
                             value=(status == "Done"),
-                            key=chk_key,
+                            key=f"chk_done_{aid}",
                             label_visibility="collapsed",
                             on_change=on_checkbox_toggle,
-                            args=(aid, row_dict)
+                            args=(aid, row_dict),
                         )
-
                     with c_top2:
                         st.markdown(f"<span class='course-badge'>{course}</span>", unsafe_allow_html=True)
-
                     with c_top3:
                         if st.button("✏️ Edit", key=f"edit_btn_{aid}"):
                             st.session_state["_edit_assignment_id"] = aid
                             safe_rerun()
-
                     with c_top4:
                         st.markdown(f"<div class='{status_class}'>", unsafe_allow_html=True)
-                        sel_key = f"status_sel_{aid}"
                         st.selectbox(
                             "Status",
                             STATUS_OPTIONS,
                             index=STATUS_OPTIONS.index(status) if status in STATUS_OPTIONS else 0,
-                            key=sel_key,
+                            key=f"status_sel_{aid}",
                             label_visibility="collapsed",
                             on_change=on_status_change,
-                            args=(aid, row_dict)
+                            args=(aid, row_dict),
                         )
                         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1472,24 +1365,23 @@ else:
                             st.markdown("<div class='prio-label'>PRIORITY:</div>", unsafe_allow_html=True)
                         with prio_col2:
                             st.markdown(f"<div class='{prio_class}'>", unsafe_allow_html=True)
-                            prio_key = f"prio_sel_{aid}"
                             st.selectbox(
                                 "Priority",
                                 PRIORITY_OPTIONS,
                                 index=PRIORITY_OPTIONS.index(priority) if priority in PRIORITY_OPTIONS else 0,
-                                key=prio_key,
+                                key=f"prio_sel_{aid}",
                                 label_visibility="collapsed",
                                 on_change=on_priority_change,
-                                args=(aid, row_dict)
+                                args=(aid, row_dict),
                             )
                             st.markdown("</div>", unsafe_allow_html=True)
 
-                    eta = str(row.get("eta") or "").strip()
-                    notes = str(row.get("notes") or "").strip()
-
                     if eta:
                         st.markdown(f"<div class='meta-row'>⏱️ {eta}</div>", unsafe_allow_html=True)
-
                     if notes:
                         note_preview = notes if len(notes) <= 140 else notes[:137] + "..."
                         st.markdown(f"<div class='meta-row'>📝 {note_preview}</div>", unsafe_allow_html=True)
+
+
+# End of file
+"""}],
