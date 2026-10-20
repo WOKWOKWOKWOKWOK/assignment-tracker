@@ -272,7 +272,7 @@ def sign_out() -> None:
                 pass
     except Exception:
         pass
-    for key in ["user", "df_cached"]:
+    for key in ["user", "df_cached", "courses_cache"]:
         if key in st.session_state:
             del st.session_state[key]
     safe_rerun()
@@ -371,8 +371,15 @@ def current_user() -> Optional[Dict[str, Any]]:
 # Supabase Cloud & Local Persistence Helpers
 # -----------------------
 def invalidate_cache():
-    if "df_cached" in st.session_state:
-        del st.session_state["df_cached"]
+    for key in ["df_cached", "courses_cache"]:
+        if key in st.session_state:
+            del st.session_state[key]
+
+
+def refresh_user_cache(user_id: str) -> None:
+    """Cache the most frequently-used datasets for this user to avoid repeated reads."""
+    st.session_state["df_cached"] = fetch_assignments(user_id)
+    st.session_state["courses_cache"] = _read_courses_file(user_id)
 
 
 def _read_data_file() -> List[Dict[str, Any]]:
@@ -478,6 +485,9 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
             json.dump(all_courses, f, indent=2)
     except Exception:
         pass
+
+    if "courses_cache" in st.session_state:
+        st.session_state["courses_cache"] = courses
 
 
 def fetch_assignments(user_id: str) -> pd.DataFrame:
@@ -593,6 +603,8 @@ def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     row_dict["status"] = new_status
     st.session_state[f"status_sel_{aid}"] = new_status
     upsert_assignments([row_dict])
+    if row_dict.get("user_id"):
+        st.session_state["df_cached"] = fetch_assignments(str(row_dict["user_id"]))
 
 
 def on_status_change(aid: str, row_dict: Dict[str, Any]):
@@ -604,6 +616,8 @@ def on_status_change(aid: str, row_dict: Dict[str, Any]):
         row_dict["status"] = new_status
         st.session_state[f"chk_done_{aid}"] = (new_status == "Done")
         upsert_assignments([row_dict])
+        if row_dict.get("user_id"):
+            st.session_state["df_cached"] = fetch_assignments(str(row_dict["user_id"]))
 
 
 def on_priority_change(aid: str, row_dict: Dict[str, Any]):
@@ -611,6 +625,8 @@ def on_priority_change(aid: str, row_dict: Dict[str, Any]):
     if new_prio:
         row_dict["priority"] = new_prio
         upsert_assignments([row_dict])
+        if row_dict.get("user_id"):
+            st.session_state["df_cached"] = fetch_assignments(str(row_dict["user_id"]))
 
 
 # -----------------------
@@ -1076,7 +1092,7 @@ def show_auth_dialog():
                 st.session_state.user = user_obj
                 u_id = str(user_obj.get("id") or user_obj.get("sub") or str(uuid.uuid4()))
                 invalidate_cache()
-                if not _read_courses_file(u_id):
+                if not st.session_state.get("courses_cache", _read_courses_file(u_id)):
                     st.session_state["_show_welcome_courses_modal"] = True
                 safe_rerun()
 
@@ -1101,6 +1117,7 @@ def show_welcome_courses_dialog(user_id: str):
         parsed_courses = [c.strip().upper() for c in courses_input.replace("\n", ",").split(",") if c.strip()]
         if parsed_courses:
             _write_courses_file(user_id, parsed_courses)
+            st.session_state["courses_cache"] = parsed_courses
             st.success("Classes saved successfully!")
             safe_rerun()
         else:
@@ -1111,7 +1128,7 @@ def show_welcome_courses_dialog(user_id: str):
 def show_add_assignment_dialog(user_id: str):
     st.session_state["_open_add_modal"] = False
 
-    courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+    courses = st.session_state.get("courses_cache") or _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
     with st.form("add_assignment_form"):
         title = st.text_input("Assignment Name", key="add_title")
         course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key="add_course_choice")
@@ -1141,17 +1158,20 @@ def show_add_assignment_dialog(user_id: str):
                 "prev_status": status if status != "Done" else "Not Started",
             }
             upsert_assignments([new_row])
+            st.session_state["df_cached"] = fetch_assignments(user_id)
+            st.session_state["courses_cache"] = _read_courses_file(user_id)
             if course_free.strip():
-                c_list = _read_courses_file(user_id)
+                c_list = st.session_state.get("courses_cache") or _read_courses_file(user_id)
                 if course_free.strip().upper() not in c_list:
                     c_list.append(course_free.strip().upper())
                     _write_courses_file(user_id, c_list)
+                    st.session_state["courses_cache"] = c_list
             safe_rerun()
 
 
 @dialog_decorator("Edit Assignment Details")
 def show_edit_assignment_dialog(user_id: str, aid: str):
-    df_current = fetch_assignments(user_id)
+    df_current = st.session_state.get("df_cached") if "df_cached" in st.session_state else fetch_assignments(user_id)
     assignment = df_current[df_current["id"] == aid].to_dict(orient="records") if not df_current.empty else []
     assignment_record = assignment[0] if assignment else None
 
@@ -1162,7 +1182,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
 
     st.session_state["_edit_assignment_id"] = ""
 
-    courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+    courses = st.session_state.get("courses_cache") or _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
     with st.form("edit_assignment_form"):
         title = st.text_input("Assignment Name", value=assignment_record.get("title", ""), key=f"edit_title_{aid}")
         course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key=f"edit_course_choice_{aid}")
@@ -1198,10 +1218,14 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
                 "prev_status": status if status != "Done" else assignment_record.get("prev_status", "Not Started"),
             }
             upsert_assignments([updated])
+            st.session_state["df_cached"] = fetch_assignments(user_id)
+            st.session_state["courses_cache"] = _read_courses_file(user_id)
             safe_rerun()
 
         if delete_click:
             delete_assignment(aid)
+            st.session_state["df_cached"] = fetch_assignments(user_id)
+            st.session_state["courses_cache"] = _read_courses_file(user_id)
             safe_rerun()
 
 
@@ -1210,7 +1234,7 @@ def show_manage_courses_dialog(user_id: str):
     st.session_state["_open_manage_courses"] = False
 
     st.subheader("📚 Your Active Classes")
-    courses = _read_courses_file(user_id)
+    courses = st.session_state.get("courses_cache") or _read_courses_file(user_id)
     to_remove = []
 
     if courses:
@@ -1227,6 +1251,7 @@ def show_manage_courses_dialog(user_id: str):
     if to_remove:
         courses = [c for c in courses if c not in to_remove]
         _write_courses_file(user_id, courses)
+        st.session_state["courses_cache"] = courses
         safe_rerun()
 
     st.markdown("---")
@@ -1237,6 +1262,7 @@ def show_manage_courses_dialog(user_id: str):
             if v not in courses:
                 courses.append(v)
                 _write_courses_file(user_id, courses)
+                st.session_state["courses_cache"] = courses
                 safe_rerun()
             else:
                 st.warning("That class already exists.")
@@ -1254,7 +1280,12 @@ if not user:
 user_id = str(user.get("id") or user.get("sub") or user.get("user_id") or str(uuid.uuid4()))
 email = user.get("email") or (user.get("user_metadata") or {}).get("email") or "Logged In"
 
-if not _read_courses_file(user_id) and "_show_welcome_courses_modal" not in st.session_state:
+if "courses_cache" not in st.session_state:
+    st.session_state["courses_cache"] = _read_courses_file(user_id)
+if "df_cached" not in st.session_state:
+    st.session_state["df_cached"] = fetch_assignments(user_id)
+
+if not st.session_state.get("courses_cache") and "_show_welcome_courses_modal" not in st.session_state:
     st.session_state["_show_welcome_courses_modal"] = True
 
 # -----------------------
@@ -1299,11 +1330,13 @@ with col_header_right:
     btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.2, 1.2, 1.3, 0.9, 2.2])
     with btn_col1:
         if st.button("🧹 Clear Completed", key="toolbar_clear"):
-            df_active = fetch_assignments(user_id)
+            df_active = st.session_state.get("df_cached") or fetch_assignments(user_id)
             if not df_active.empty:
                 done_ids = df_active[df_active["status"] == "Done"]["id"].tolist()
                 for aid in done_ids:
                     delete_assignment(aid)
+            st.session_state["df_cached"] = fetch_assignments(user_id)
+            st.session_state["courses_cache"] = _read_courses_file(user_id)
             safe_rerun()
     with btn_col2:
         if st.button("➕ Add Assignment", key="toolbar_add"):
@@ -1343,10 +1376,7 @@ with col_sort:
 # -----------------------
 # Assignment Cards Grid (User Isolated)
 # -----------------------
-if "df_cached" not in st.session_state:
-    st.session_state.df_cached = fetch_assignments(user_id)
-
-df = st.session_state.df_cached.copy()
+df = st.session_state["df_cached"].copy() if "df_cached" in st.session_state else fetch_assignments(user_id)
 
 if search_q:
     q = search_q.lower()
