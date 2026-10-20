@@ -48,6 +48,7 @@ def safe_rerun() -> None:
     elif hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
+
 # Safe Modal Decorator Setup
 if hasattr(st, "dialog"):
     dialog_decorator = st.dialog
@@ -61,6 +62,7 @@ else:
                 return func(*args, **kwargs)
             return wrapper
         return decorator
+
 
 # -----------------------
 # Config / persistence
@@ -158,8 +160,20 @@ def _pack_notes(notes_text: str, prev_status: str) -> str:
 
 def _unpack_notes(raw_notes: Any) -> Tuple[str, str]:
     """Extracts text notes and previous status with fallback."""
-    if not raw_notes:
+    if raw_notes is None:
         return ("", "Not Started")
+
+    if isinstance(raw_notes, dict):
+        return (
+            str(raw_notes.get("text", "")),
+            str(raw_notes.get("prev_status") or "Not Started")
+        )
+
+    if isinstance(raw_notes, list):
+        if raw_notes and isinstance(raw_notes[0], dict):
+            return _unpack_notes(raw_notes[0])
+        return ("".join(str(x) for x in raw_notes), "Not Started")
+
     try:
         data = json.loads(str(raw_notes))
         if isinstance(data, dict):
@@ -170,6 +184,35 @@ def _unpack_notes(raw_notes: Any) -> Tuple[str, str]:
     except Exception:
         pass
     return (str(raw_notes), "Not Started")
+
+
+def _assignment_row_from_record(r: Dict[str, Any]) -> Dict[str, Any]:
+    n_text, prev_st = _unpack_notes(r.get("notes"))
+    raw_course = r.get("course")
+
+    if isinstance(raw_course, list) and len(raw_course) > 0:
+        course_str = str(raw_course[0])
+    elif isinstance(raw_course, dict):
+        course_str = str(raw_course.get("name") or raw_course.get("title") or "GENERAL")
+    elif isinstance(raw_course, str):
+        course_str = raw_course
+    else:
+        course_str = str(raw_course) if raw_course else "GENERAL"
+
+    return {
+        "id": str(r.get("id")),
+        "user_id": str(r.get("user_id") or ""),
+        "title": r.get("title") or "",
+        "course": course_str.strip().upper(),
+        "due_date": r.get("due_date") or "",
+        "status": r.get("status") or "Not Started",
+        "priority": r.get("priority") or "Medium",
+        "atype": r.get("atype") or "Homework",
+        "eta": str(r.get("eta") or ""),
+        "created_at": r.get("created_at") or "",
+        "notes": n_text,
+        "prev_status": prev_st,
+    }
 
 
 # -----------------------
@@ -449,32 +492,7 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
                 for r in res.data:
                     if str(r.get("id")) == cfg_id:
                         continue
-                    n_text, prev_st = _unpack_notes(r.get("notes"))
-                    raw_course = r.get("course")
-                    
-                    if isinstance(raw_course, list) and len(raw_course) > 0:
-                        course_str = str(raw_course[0])
-                    elif isinstance(raw_course, dict):
-                        course_str = str(raw_course.get("name") or raw_course.get("title") or "GENERAL")
-                    elif isinstance(raw_course, str):
-                        course_str = raw_course
-                    else:
-                        course_str = str(raw_course) if raw_course else "GENERAL"
-
-                    rows.append({
-                        "id": str(r.get("id")),
-                        "user_id": str(r.get("user_id")),
-                        "title": r.get("title") or "",
-                        "course": course_str.strip().upper(),
-                        "due_date": r.get("due_date") or "",
-                        "status": r.get("status") or "Not Started",
-                        "priority": r.get("priority") or "Medium",
-                        "atype": r.get("atype") or "Homework",
-                        "eta": r.get("eta") or "",
-                        "created_at": r.get("created_at") or "",
-                        "notes": n_text,
-                        "prev_status": prev_st
-                    })
+                    rows.append(_assignment_row_from_record(r))
         except Exception as err:
             st.error(f"Supabase fetch error: {err}")
 
@@ -483,25 +501,11 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
         if isinstance(local_rows, list):
             for r in local_rows:
                 if str(r.get("user_id")) == str(user_id) and r.get("title") != "__SYSTEM_COURSES__":
-                    n_text, prev_st = _unpack_notes(r.get("notes"))
-                    rows.append({
-                        "id": str(r.get("id")),
-                        "user_id": str(r.get("user_id")),
-                        "title": r.get("title") or "",
-                        "course": str(r.get("course") or "GENERAL").strip().upper(),
-                        "due_date": r.get("due_date") or "",
-                        "status": r.get("status") or "Not Started",
-                        "priority": r.get("priority") or "Medium",
-                        "atype": r.get("atype") or "Homework",
-                        "eta": r.get("eta") or "",
-                        "created_at": r.get("created_at") or "",
-                        "notes": n_text,
-                        "prev_status": prev_st
-                    })
+                    rows.append(_assignment_row_from_record(r))
 
     if not rows:
         return pd.DataFrame(columns=["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes", "prev_status"])
-    
+
     df = pd.DataFrame(rows)
     for c in ["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes", "prev_status"]:
         if c not in df.columns:
@@ -513,10 +517,10 @@ def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
     """Upserts assignments directly into Supabase Cloud `assignments` table."""
     db_rows = []
     for r in rows_to_upsert:
-        n_text = r.get("notes", "")
+        n_text = str(r.get("notes", "") or "")
         prev_st = r.get("prev_status", "Not Started")
         packed_notes = _pack_notes(n_text, prev_st)
-        
+
         due_val = r.get("due_date")
         if not due_val:
             due_val = None
@@ -552,6 +556,7 @@ def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
         else:
             by_id[rid] = row
     _write_data_file(list(by_id.values()))
+    invalidate_cache()
 
 
 def delete_assignment(assignment_id: str) -> None:
@@ -564,6 +569,7 @@ def delete_assignment(assignment_id: str) -> None:
     rows = _read_data_file()
     remaining = [r for r in rows if r.get("id") != assignment_id]
     _write_data_file(remaining)
+    invalidate_cache()
 
 
 # -----------------------
@@ -571,7 +577,7 @@ def delete_assignment(assignment_id: str) -> None:
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     chk_val = st.session_state.get(f"chk_done_{aid}", False)
-    
+
     if chk_val:
         current_st = row_dict.get("status", "Not Started")
         if current_st != "Done":
@@ -1005,14 +1011,14 @@ def show_auth_dialog():
     mode = st.radio("Choose Action", ["Sign In", "Sign Up"], horizontal=True, key="auth_modal_mode")
 
     col_input, col_badge = st.columns([2.5, 1.5])
-    
+
     with col_input:
         raw_email_input = st.text_input(
             "Username or Full Email",
             key="auth_modal_email",
             placeholder="e.g. 30guptaa"
         )
-        
+
     typed_user = raw_email_input.strip()
     has_custom_domain = "@" in typed_user
 
@@ -1084,13 +1090,13 @@ def show_welcome_courses_dialog(user_id: str):
 
     st.markdown("### 🎓 Welcome to Assignment Tracker!")
     st.write("Please list the subjects or classes you are taking this term (comma separated or line by line):")
-    
+
     courses_input = st.text_area(
         "Enter your classes:",
         value="MATH, SCIENCE, ENGLISH, HISTORY",
         help="Example: MATH, SCIENCE, SPANISH, AP PHYSICS"
     )
-    
+
     if st.button("Save Schedule & Start", key="save_initial_courses_btn"):
         parsed_courses = [c.strip().upper() for c in courses_input.replace("\n", ",").split(",") if c.strip()]
         if parsed_courses:
@@ -1168,7 +1174,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
         atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=(TYPE_OPTIONS.index(assignment_record.get("atype")) if assignment_record.get("atype") in TYPE_OPTIONS else 0), key=f"edit_atype_{aid}")
         eta = st.text_input("Estimated Duration", value=assignment_record.get("eta", ""), key=f"edit_eta_{aid}")
         notes = st.text_area("Notes", value=assignment_record.get("notes", ""), key=f"edit_notes_{aid}")
-        
+
         c_save, c_del = st.columns([1, 1])
         with c_save:
             updated_click = st.form_submit_button("Save Changes")
@@ -1206,7 +1212,7 @@ def show_manage_courses_dialog(user_id: str):
     st.subheader("📚 Your Active Classes")
     courses = _read_courses_file(user_id)
     to_remove = []
-    
+
     if courses:
         for i, c in enumerate(courses):
             col_a, col_b = st.columns([6, 2])
@@ -1366,7 +1372,7 @@ else:
                     due_d = parse_date_iso_or_empty(row.get("due_date"))
                     due_text = format_mdy(due_d)
                     days_text, _ = days_left(due_d)
-                    
+
                     status = st.session_state.get(f"status_sel_{aid}") or row.get("status") or "Not Started"
                     priority = row.get("priority") or "Low"
                     row_dict = row.to_dict()
@@ -1384,7 +1390,7 @@ else:
                         prio_class = "prio-high"
 
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
-                    
+
                     with c_top1:
                         chk_key = f"chk_done_{aid}"
                         st.checkbox(
@@ -1398,12 +1404,12 @@ else:
 
                     with c_top2:
                         st.markdown(f"<span class='course-badge'>{course}</span>", unsafe_allow_html=True)
-                    
+
                     with c_top3:
                         if st.button("✏️ Edit", key=f"edit_btn_{aid}"):
                             st.session_state["_edit_assignment_id"] = aid
                             safe_rerun()
-                    
+
                     with c_top4:
                         st.markdown(f"<div class='{status_class}'>", unsafe_allow_html=True)
                         sel_key = f"status_sel_{aid}"
@@ -1445,3 +1451,20 @@ else:
                                 args=(aid, row_dict)
                             )
                             st.markdown("</div>", unsafe_allow_html=True)
+
+                    eta_value = str(row.get("eta") or "").strip()
+                    notes_value = str(row.get("notes") or "").strip()
+
+                    with st.expander("Details", expanded=False):
+                        if eta_value:
+                            st.caption("Estimated Time")
+                            st.write(eta_value)
+                        else:
+                            st.caption("Estimated Time")
+                            st.write("—")
+
+                        st.caption("Notes")
+                        if notes_value:
+                            st.write(notes_value)
+                        else:
+                            st.write("No notes yet.")
