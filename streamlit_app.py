@@ -2,7 +2,7 @@
 Assignment Tracker — Full Persisted Terminal Interface & Supabase Sync
 
 Features:
-- Dedicated "Tests & Quizzes" tab alongside "All Assignments"
+- Completely separated "Assignments" (Homework, Essays, etc.) and "Tests & Quizzes" tabs
 - Terminal-style full-page authentication UI matching the dual-card stacked design
 - Native single-table Supabase persistence (`assignments`)
 - Auto-domain appending (@simsburyschools.net) with custom domain override support
@@ -1141,7 +1141,7 @@ def render_terminal_auth_page():
 # -----------------------
 # Grid Renderer Component
 # -----------------------
-def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "all_"):
+def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
     if df_grid.empty:
         st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found in this view.</div>", unsafe_allow_html=True)
         return
@@ -1535,12 +1535,13 @@ if search_q:
 df = sort_df(df, sort_by)
 
 # -----------------------
-# Tabbed Assignment Display
+# Tabbed Assignment Display (Strictly Separated Views)
 # -----------------------
-tab_all, tab_tests = st.tabs(["📋 All Assignments", "🧪 Tests & Quizzes"])
+tab_assignments, tab_tests = st.tabs(["📋 Assignments", "🧪 Tests & Quizzes"])
 
-with tab_all:
-    render_assignment_grid(df, key_prefix="all_")
+with tab_assignments:
+    df_regular = df[df["atype"] != "Test & Quizzes"]
+    render_assignment_grid(df_regular, key_prefix="reg_")
 
 with tab_tests:
     df_tests = df[df["atype"] == "Test & Quizzes"]
