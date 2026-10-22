@@ -2,6 +2,7 @@
 Assignment Tracker — Full Persisted Terminal Interface & Supabase Sync
 
 Features:
+- Dedicated "Tests & Quizzes" tab alongside "All Assignments"
 - Terminal-style full-page authentication UI matching the dual-card stacked design
 - Native single-table Supabase persistence (`assignments`)
 - Auto-domain appending (@simsburyschools.net) with custom domain override support
@@ -587,8 +588,8 @@ def delete_assignment(assignment_id: str) -> None:
 # -----------------------
 # Real-Time Callback Handlers
 # -----------------------
-def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
-    chk_val = st.session_state.get(f"chk_done_{aid}", False)
+def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any], widget_key: str):
+    chk_val = st.session_state.get(widget_key, False)
 
     if chk_val:
         current_st = row_dict.get("status", "Not Started")
@@ -607,8 +608,8 @@ def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any]):
     upsert_assignments([row_dict])
 
 
-def on_status_change(aid: str, row_dict: Dict[str, Any]):
-    new_status = st.session_state.get(f"status_sel_{aid}")
+def on_status_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
+    new_status = st.session_state.get(widget_key)
     if new_status:
         if new_status != "Done":
             row_dict["prev_status"] = new_status
@@ -618,8 +619,8 @@ def on_status_change(aid: str, row_dict: Dict[str, Any]):
         upsert_assignments([row_dict])
 
 
-def on_priority_change(aid: str, row_dict: Dict[str, Any]):
-    new_prio = st.session_state.get(f"prio_sel_{aid}")
+def on_priority_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
+    new_prio = st.session_state.get(widget_key)
     if new_prio:
         row_dict["priority"] = new_prio
         upsert_assignments([row_dict])
@@ -705,6 +706,33 @@ st.markdown(
     div[data-testid="collapsedControl"],
     button[data-testid="stSidebarCollapseButton"] {
         display: none !important;
+    }
+
+    /* Tab Navigation Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: transparent;
+        border-bottom: 1px solid #1e293b;
+        margin-bottom: 18px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        height: 42px;
+        white-space: pre;
+        border-radius: 8px 8px 0 0;
+        color: #94a3b8;
+        font-weight: 600;
+        font-size: 0.9rem;
+        padding: 8px 18px;
+        background-color: #0f172a;
+        border: 1px solid #1e293b;
+        border-bottom: none;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: #1e1b4b !important;
+        color: #a5b4fc !important;
+        border-color: #4f46e5 !important;
     }
 
     /* Header Cards Styling for Terminal Auth UI */
@@ -883,7 +911,7 @@ st.markdown(
     }
 
     /* Edit Button Styling inside Card */
-    button[key^="edit_btn_"] {
+    button[key^="edit_btn_"], button[key*="_edit_btn_"] {
         padding: 2px 8px !important;
         font-size: 0.8rem !important;
         min-height: 32px !important;
@@ -1044,7 +1072,6 @@ def render_terminal_auth_page():
     c_left, c_center, c_right = st.columns([1, 1.8, 1])
 
     with c_center:
-        # Top Blue Outlined Banner Box
         st.markdown(
             """
             <div class="auth-header-card">
@@ -1055,17 +1082,16 @@ def render_terminal_auth_page():
             unsafe_allow_html=True,
         )
 
-        # Bottom Input Container Box
         st.markdown('<div class="auth-form-card">', unsafe_allow_html=True)
-        
+
         mode = st.radio("Action Mode", ["Sign In", "Sign Up"], horizontal=True, label_visibility="collapsed", key="terminal_mode")
-        
+
         raw_user_input = st.text_input(
             "Enter Username / Email:",
             placeholder="30guptaa or username@simsburyschools.net",
             key="terminal_user"
         )
-        
+
         password = st.text_input("Password:", type="password", key="terminal_pw")
 
         typed_user = raw_user_input.strip()
@@ -1110,6 +1136,120 @@ def render_terminal_auth_page():
                     safe_rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)
+
+
+# -----------------------
+# Grid Renderer Component
+# -----------------------
+def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "all_"):
+    if df_grid.empty:
+        st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found in this view.</div>", unsafe_allow_html=True)
+        return
+
+    cards_per_row = 3
+    chunked_rows = [df_grid.iloc[i:i + cards_per_row] for i in range(0, len(df_grid), cards_per_row)]
+
+    for row_df in chunked_rows:
+        cols = st.columns(cards_per_row)
+        for idx, (_, row) in enumerate(row_df.iterrows()):
+            with cols[idx]:
+                with st.container(border=True):
+                    aid = row.get("id")
+                    title = row.get("title") or "Untitled"
+                    course = (row.get("course") or "MATH").upper()
+                    atype = row.get("atype") or "Essay"
+                    due_d = parse_date_iso_or_empty(row.get("due_date"))
+                    due_text = format_mdy(due_d)
+                    days_text, _ = days_left(due_d)
+
+                    status = st.session_state.get(f"{key_prefix}status_sel_{aid}") or row.get("status") or "Not Started"
+                    priority = row.get("priority") or "Low"
+                    row_dict = row.to_dict()
+
+                    status_class = "status-not-started"
+                    if status == "In Progress":
+                        status_class = "status-in-progress"
+                    elif status == "Done":
+                        status_class = "status-done"
+
+                    prio_class = "prio-low"
+                    if priority == "Medium":
+                        prio_class = "prio-medium"
+                    elif priority == "High":
+                        prio_class = "prio-high"
+
+                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
+
+                    with c_top1:
+                        chk_key = f"{key_prefix}chk_done_{aid}"
+                        st.checkbox(
+                            "Done",
+                            value=(status == "Done"),
+                            key=chk_key,
+                            label_visibility="collapsed",
+                            on_change=on_checkbox_toggle,
+                            args=(aid, row_dict, chk_key)
+                        )
+
+                    with c_top2:
+                        st.markdown(f"<span class='course-badge'>{course}</span>", unsafe_allow_html=True)
+
+                    with c_top3:
+                        if st.button("✏️ Edit", key=f"{key_prefix}edit_btn_{aid}"):
+                            st.session_state["_edit_assignment_id"] = aid
+                            safe_rerun()
+
+                    with c_top4:
+                        st.markdown(f"<div class='{status_class}'>", unsafe_allow_html=True)
+                        sel_key = f"{key_prefix}status_sel_{aid}"
+                        st.selectbox(
+                            "Status",
+                            STATUS_OPTIONS,
+                            index=STATUS_OPTIONS.index(status) if status in STATUS_OPTIONS else 0,
+                            key=sel_key,
+                            label_visibility="collapsed",
+                            on_change=on_status_change,
+                            args=(aid, row_dict, sel_key)
+                        )
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                    st.markdown(f"<div class='card-title'>{title}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='card-type'><span>📌</span> {atype}</div>", unsafe_allow_html=True)
+                    st.markdown("<hr class='card-hr'/>", unsafe_allow_html=True)
+
+                    c_bot1, c_bot2 = st.columns([1.5, 1.8])
+                    with c_bot1:
+                        st.markdown(
+                            f"<div class='due-date-text'><span>📅</span> {due_text} <span class='days-badge'>{days_text}</span></div>",
+                            unsafe_allow_html=True,
+                        )
+                    with c_bot2:
+                        prio_col1, prio_col2 = st.columns([0.9, 1.5])
+                        with prio_col1:
+                            st.markdown("<div class='prio-label'>PRIORITY:</div>", unsafe_allow_html=True)
+                        with prio_col2:
+                            st.markdown(f"<div class='{prio_class}'>", unsafe_allow_html=True)
+                            prio_key = f"{key_prefix}prio_sel_{aid}"
+                            st.selectbox(
+                                "Priority",
+                                PRIORITY_OPTIONS,
+                                index=PRIORITY_OPTIONS.index(priority) if priority in PRIORITY_OPTIONS else 0,
+                                key=prio_key,
+                                label_visibility="collapsed",
+                                on_change=on_priority_change,
+                                args=(aid, row_dict, prio_key)
+                            )
+                            st.markdown("</div>", unsafe_allow_html=True)
+
+                    eta = str(row.get("eta") or "").strip()
+                    notes = str(row.get("notes") or "").strip()
+
+                    if eta:
+                        st.markdown(f"<div class='meta-row'>⏱️ {eta}</div>", unsafe_allow_html=True)
+
+                    if notes:
+                        note_preview = notes if len(notes) <= 140 else notes[:137] + "..."
+                        st.markdown(f"<div class='meta-row'>📝 {note_preview}</div>", unsafe_allow_html=True)
 
 
 # -----------------------
@@ -1394,110 +1534,14 @@ if search_q:
 
 df = sort_df(df, sort_by)
 
-if df.empty:
-    st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found, enjoy.</div>", unsafe_allow_html=True)
-else:
-    cards_per_row = 3
-    chunked_rows = [df.iloc[i:i + cards_per_row] for i in range(0, len(df), cards_per_row)]
+# -----------------------
+# Tabbed Assignment Display
+# -----------------------
+tab_all, tab_tests = st.tabs(["📋 All Assignments", "🧪 Tests & Quizzes"])
 
-    for row_df in chunked_rows:
-        cols = st.columns(cards_per_row)
-        for idx, (_, row) in enumerate(row_df.iterrows()):
-            with cols[idx]:
-                with st.container(border=True):
-                    aid = row.get("id")
-                    title = row.get("title") or "Untitled"
-                    course = (row.get("course") or "MATH").upper()
-                    atype = row.get("atype") or "Essay"
-                    due_d = parse_date_iso_or_empty(row.get("due_date"))
-                    due_text = format_mdy(due_d)
-                    days_text, _ = days_left(due_d)
+with tab_all:
+    render_assignment_grid(df, key_prefix="all_")
 
-                    status = st.session_state.get(f"status_sel_{aid}") or row.get("status") or "Not Started"
-                    priority = row.get("priority") or "Low"
-                    row_dict = row.to_dict()
-
-                    status_class = "status-not-started"
-                    if status == "In Progress":
-                        status_class = "status-in-progress"
-                    elif status == "Done":
-                        status_class = "status-done"
-
-                    prio_class = "prio-low"
-                    if priority == "Medium":
-                        prio_class = "prio-medium"
-                    elif priority == "High":
-                        prio_class = "prio-high"
-
-                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
-
-                    with c_top1:
-                        chk_key = f"chk_done_{aid}"
-                        st.checkbox(
-                            "Done",
-                            value=(status == "Done"),
-                            key=chk_key,
-                            label_visibility="collapsed",
-                            on_change=on_checkbox_toggle,
-                            args=(aid, row_dict)
-                        )
-
-                    with c_top2:
-                        st.markdown(f"<span class='course-badge'>{course}</span>", unsafe_allow_html=True)
-
-                    with c_top3:
-                        if st.button("✏️ Edit", key=f"edit_btn_{aid}"):
-                            st.session_state["_edit_assignment_id"] = aid
-                            safe_rerun()
-
-                    with c_top4:
-                        st.markdown(f"<div class='{status_class}'>", unsafe_allow_html=True)
-                        sel_key = f"status_sel_{aid}"
-                        st.selectbox(
-                            "Status",
-                            STATUS_OPTIONS,
-                            index=STATUS_OPTIONS.index(status) if status in STATUS_OPTIONS else 0,
-                            key=sel_key,
-                            label_visibility="collapsed",
-                            on_change=on_status_change,
-                            args=(aid, row_dict)
-                        )
-                        st.markdown("</div>", unsafe_allow_html=True)
-
-                    st.markdown(f"<div class='card-title'>{title}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='card-type'><span>📌</span> {atype}</div>", unsafe_allow_html=True)
-                    st.markdown("<hr class='card-hr'/>", unsafe_allow_html=True)
-
-                    c_bot1, c_bot2 = st.columns([1.5, 1.8])
-                    with c_bot1:
-                        st.markdown(
-                            f"<div class='due-date-text'><span>📅</span> {due_text} <span class='days-badge'>{days_text}</span></div>",
-                            unsafe_allow_html=True,
-                        )
-                    with c_bot2:
-                        prio_col1, prio_col2 = st.columns([0.9, 1.5])
-                        with prio_col1:
-                            st.markdown("<div class='prio-label'>PRIORITY:</div>", unsafe_allow_html=True)
-                        with prio_col2:
-                            st.markdown(f"<div class='{prio_class}'>", unsafe_allow_html=True)
-                            prio_key = f"prio_sel_{aid}"
-                            st.selectbox(
-                                "Priority",
-                                PRIORITY_OPTIONS,
-                                index=PRIORITY_OPTIONS.index(priority) if priority in PRIORITY_OPTIONS else 0,
-                                key=prio_key,
-                                label_visibility="collapsed",
-                                on_change=on_priority_change,
-                                args=(aid, row_dict)
-                            )
-                            st.markdown("</div>", unsafe_allow_html=True)
-
-                    eta = str(row.get("eta") or "").strip()
-                    notes = str(row.get("notes") or "").strip()
-
-                    if eta:
-                        st.markdown(f"<div class='meta-row'>⏱️ {eta}</div>", unsafe_allow_html=True)
-
-                    if notes:
-                        note_preview = notes if len(notes) <= 140 else notes[:137] + "..."
-                        st.markdown(f"<div class='meta-row'>📝 {note_preview}</div>", unsafe_allow_html=True)
+with tab_tests:
+    df_tests = df[df["atype"] == "Test & Quizzes"]
+    render_assignment_grid(df_tests, key_prefix="tests_")
