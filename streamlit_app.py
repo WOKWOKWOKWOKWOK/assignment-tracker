@@ -1,11 +1,11 @@
 """
-Assignment Tracker — 100% Supabase Cloud Persistent (Single Table)
+Assignment Tracker — Full Persisted Terminal Interface & Supabase Sync
 
-Fixes:
-- Explicit error reporting for Supabase API calls (no silent failovers)
-- Persistent cloud storage for class schedules via system records in `assignments`
-- Complete data survival across Streamlit Cloud restarts and server reboots
-- Full dark theme UI with hidden sidebar and responsive multi-device layout
+Features:
+- Terminal-style full-page authentication UI matching the dual-card stacked design
+- Native single-table Supabase persistence (`assignments`)
+- Auto-domain appending (@simsburyschools.net) with custom domain override support
+- Full dark mode theme, hidden sidebar, and responsive assignment grid
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
-
-# Hide Streamlit top toolbar, header, and footer/manage app overlay
-hide_streamlit_elements = """
+# Hide Streamlit top toolbar, header, and footer overlays
+st.markdown(
+    """
     <style>
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
@@ -30,8 +30,9 @@ hide_streamlit_elements = """
     div[data-testid="stDecoration"] {display: none !important;}
     div[data-testid="stStatusWidget"] {visibility: hidden !important;}
     </style>
-"""
-st.markdown(hide_streamlit_elements, unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 try:
     from supabase import Client, create_client  # type: ignore
@@ -681,20 +682,20 @@ def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
 
 
 # -----------------------
-# CSS Styling (100% Unchanged UI)
+# CSS Styling & Layout Overrides
 # -----------------------
 st.markdown(
     """
     <style>
     /* Dark Theme Canvas */
     .stApp {
-        background-color: #0b0f19 !important;
+        background-color: #080c14 !important;
         color: #e2e8f0;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
     .main .block-container {
-        padding-top: 1.25rem !important;
+        padding-top: 2rem !important;
         padding-bottom: 3rem !important;
         max-width: 1440px;
     }
@@ -704,6 +705,61 @@ st.markdown(
     div[data-testid="collapsedControl"],
     button[data-testid="stSidebarCollapseButton"] {
         display: none !important;
+    }
+
+    /* Header Cards Styling for Terminal Auth UI */
+    .auth-header-card {
+        background-color: #0c1322;
+        border: 1.5px solid #2563eb;
+        border-radius: 12px;
+        padding: 32px 24px;
+        text-align: center;
+        margin-bottom: 16px;
+        box-shadow: 0 4px 20px rgba(37, 99, 235, 0.15);
+    }
+
+    .auth-header-title {
+        font-size: 2.2rem;
+        font-weight: 800;
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        letter-spacing: -0.02em;
+    }
+
+    .auth-header-subtitle {
+        font-size: 0.92rem;
+        color: #94a3b8;
+        margin-top: 8px;
+    }
+
+    /* Terminal Input Container Box */
+    .auth-form-card {
+        background-color: #0c1322;
+        border: 1px solid #1e293b;
+        border-radius: 12px;
+        padding: 24px 28px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Custom Terminal Yellow/Dark Submit Button */
+    button[key="auth_submit_btn"] {
+        background-color: #1e293b !important;
+        color: #fbbf24 !important;
+        border: 1px solid #334155 !important;
+        border-radius: 8px !important;
+        font-weight: 700 !important;
+        font-size: 0.9rem !important;
+        padding: 8px 16px !important;
+        margin-top: 10px !important;
+        width: max-content !important;
+    }
+
+    button[key="auth_submit_btn"]:hover {
+        background-color: #334155 !important;
+        border-color: #fbbf24 !important;
     }
 
     /* Auto-flex Grid Layout across all screens */
@@ -759,41 +815,6 @@ st.markdown(
         background-color: #10b981;
         border-radius: 50%;
         display: inline-block;
-    }
-
-    /* Domain Suffix Badge Anchored Next to Input */
-    .domain-badge-active {
-        background-color: #1e1b4b;
-        border: 1px solid #4f46e5;
-        color: #a5b4fc;
-        padding: 9px 12px;
-        border-radius: 8px;
-        font-weight: 700;
-        font-size: 0.85rem;
-        text-align: center;
-        white-space: nowrap !important;
-        margin-top: 28px;
-    }
-
-    .domain-badge-active.custom-domain {
-        background-color: #064e3b;
-        border: 1px solid #059669;
-        color: #34d399;
-    }
-
-    /* Live Email Preview Box */
-    .live-email-preview {
-        background-color: #0f172a;
-        border: 1px solid #1e293b;
-        color: #38bdf8;
-        padding: 8px 14px;
-        border-radius: 8px;
-        font-size: 0.83rem;
-        margin-bottom: 14px;
-    }
-
-    .live-email-preview.muted {
-        color: #64748b;
     }
 
     /* Force All Streamlit Buttons To Display Unclipped Text */
@@ -969,44 +990,46 @@ st.markdown(
         white-space: nowrap !important;
     }
 
-    /* Red Badge for 'Not Started' */
-    .status-not-started div[data-baseweb=\"select\"] {
+    .status-not-started div[data-baseweb="select"] {
         background-color: #2a0812 !important;
         border: 1px solid #9f1239 !important;
         color: #fca5a5 !important;
     }
 
-    /* Amber Badge for 'In Progress' */
-    .status-in-progress div[data-baseweb=\"select\"] {
+    .status-in-progress div[data-baseweb="select"] {
         background-color: #2e1b04 !important;
         border: 1px solid #854d0e !important;
         color: #fde047 !important;
     }
 
-    /* Green Badge for 'Done' */
-    .status-done div[data-baseweb=\"select\"] {
+    .status-done div[data-baseweb="select"] {
         background-color: #032b1d !important;
         border: 1px solid #065f46 !important;
         color: #34d399 !important;
     }
 
-    /* Priority Color Accents */
-    .prio-low div[data-baseweb=\"select\"] {
+    .prio-low div[data-baseweb="select"] {
         border: 1px solid #059669 !important;
         color: #34d399 !important;
         background-color: #022c22 !important;
     }
 
-    .prio-medium div[data-baseweb=\"select\"] {
+    .prio-medium div[data-baseweb="select"] {
         border: 1px solid #d97706 !important;
         color: #fde047 !important;
         background-color: #2e1b04 !important;
     }
 
-    .prio-high div[data-baseweb=\"select\"] {
+    .prio-high div[data-baseweb="select"] {
         border: 1px solid #dc2626 !important;
         color: #fca5a5 !important;
         background-color: #2a0812 !important;
+    }
+
+    .meta-row {
+        color: #94a3b8;
+        font-size: 0.8rem;
+        margin-top: 4px;
     }
     </style>
     """,
@@ -1015,82 +1038,78 @@ st.markdown(
 
 
 # -----------------------
-# Popup Auth Dialog Modal
+# Terminal Auth Interface (Full Screen Stacked Cards)
 # -----------------------
-@dialog_decorator("Sign In / Sign Up")
-def show_auth_dialog():
-    st.markdown("### 🔒 Account Authentication")
-    mode = st.radio("Choose Action", ["Sign In", "Sign Up"], horizontal=True, key="auth_modal_mode")
+def render_terminal_auth_page():
+    c_left, c_center, c_right = st.columns([1, 1.8, 1])
 
-    col_input, col_badge = st.columns([2.5, 1.5])
-
-    with col_input:
-        raw_email_input = st.text_input(
-            "Username or Full Email",
-            key="auth_modal_email",
-            placeholder="e.g. 30guptaa"
-        )
-
-    typed_user = raw_email_input.strip()
-    has_custom_domain = "@" in typed_user
-
-    with col_badge:
-        if has_custom_domain:
-            st.markdown('<div class="domain-badge-active custom-domain">@custom</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="domain-badge-active">{DEFAULT_DOMAIN}</div>', unsafe_allow_html=True)
-
-    if typed_user:
-        resolved_email = typed_user if has_custom_domain else f"{typed_user}{DEFAULT_DOMAIN}"
+    with c_center:
+        # Top Blue Outlined Banner Box
         st.markdown(
-            f'<div class="live-email-preview">📧 Full Account Email: <b>{resolved_email}</b></div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            f'<div class="live-email-preview muted">📧 Full Account Email: <i>username{DEFAULT_DOMAIN}</i></div>',
+            """
+            <div class="auth-header-card">
+                <div class="auth-header-title">🛡️ Assignment Tracker</div>
+                <div class="auth-header-subtitle">Simsbury High School Assignment Portal</div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
-    password = st.text_input("Password", type="password", key="auth_modal_pw")
+        # Bottom Input Container Box
+        st.markdown('<div class="auth-form-card">', unsafe_allow_html=True)
+        
+        mode = st.radio("Action Mode", ["Sign In", "Sign Up"], horizontal=True, label_visibility="collapsed", key="terminal_mode")
+        
+        raw_user_input = st.text_input(
+            "Enter Username / Email:",
+            placeholder="30guptaa or username@simsburyschools.net",
+            key="terminal_user"
+        )
+        
+        password = st.text_input("Password:", type="password", key="terminal_pw")
 
-    if st.button(mode, key="auth_modal_submit_btn"):
-        email_val = typed_user
-        if email_val and "@" not in email_val:
-            email_val = f"{email_val}{DEFAULT_DOMAIN}"
+        typed_user = raw_user_input.strip()
+        btn_label = "🔑 Sign In to Terminal" if mode == "Sign In" else "📝 Register Account"
 
-        password_val = password.strip()
+        if st.button(btn_label, key="auth_submit_btn"):
+            email_val = typed_user
+            if email_val and "@" not in email_val:
+                email_val = f"{email_val}{DEFAULT_DOMAIN}"
 
-        if not email_val or not password_val:
-            st.error("Please enter both a username/email and a password.")
-        elif mode == "Sign Up":
-            res = sign_up(email_val, password_val)
-            if res.get("error"):
-                st.error(f"Sign up failed: {res.get('error')}")
+            password_val = password.strip()
+
+            if not email_val or not password_val:
+                st.error("Please enter both a username/email and a password.")
+            elif mode == "Sign Up":
+                res = sign_up(email_val, password_val)
+                if res.get("error"):
+                    st.error(f"Sign up failed: {res.get('error')}")
+                else:
+                    st.success(f"Sign up successful for {email_val}! You can now sign in.")
             else:
-                st.success(f"Sign up successful for {email_val}! You can now sign in.")
-        else:
-            res = sign_in(email_val, password_val)
-            err = res.get("error")
-            data = res.get("data") if isinstance(res, dict) else getattr(res, "data", None)
-            user_obj = extract_user_from_auth_response(res)
-            if not user_obj and isinstance(data, dict):
-                user_obj = data.get("user") or (data.get("session") or {}).get("user")
+                res = sign_in(email_val, password_val)
+                err = res.get("error")
+                data = res.get("data") if isinstance(res, dict) else getattr(res, "data", None)
+                user_obj = extract_user_from_auth_response(res)
+                if not user_obj and isinstance(data, dict):
+                    user_obj = data.get("user") or (data.get("session") or {}).get("user")
 
-            if err:
-                st.error(f"Sign in failed: {err}")
-            elif not user_obj:
-                valid_uuid_string = str(uuid.uuid5(uuid.NAMESPACE_DNS, email_val))
-                st.session_state.user = {"id": valid_uuid_string, "email": email_val}
-                invalidate_cache()
-                safe_rerun()
-            else:
-                st.session_state.user = user_obj
-                u_id = str(user_obj.get("id") or user_obj.get("sub") or str(uuid.uuid4()))
-                invalidate_cache()
-                if not _read_courses_file(u_id):
-                    st.session_state["_show_welcome_courses_modal"] = True
-                safe_rerun()
+                if err:
+                    st.error(f"Sign in failed: {err}")
+                elif not user_obj:
+                    valid_uuid_string = str(uuid.uuid5(uuid.NAMESPACE_DNS, email_val))
+                    st.session_state.user = {"id": valid_uuid_string, "email": email_val}
+                    invalidate_cache()
+                    safe_rerun()
+                else:
+                    st.session_state.user = user_obj
+                    u_id = str(user_obj.get("id") or user_obj.get("sub") or str(uuid.uuid4()))
+                    invalidate_cache()
+                    if not _read_courses_file(u_id):
+                        st.session_state["_show_welcome_courses_modal"] = True
+                    safe_rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # -----------------------
@@ -1275,12 +1294,12 @@ def show_manage_courses_dialog(user_id: str):
 
 
 # -----------------------
-# Auth Session Management
+# Auth Session Management & Main Execution
 # -----------------------
 user = current_user()
 
 if not user:
-    show_auth_dialog()
+    render_terminal_auth_page()
     st.stop()
 
 user_id = str(user.get("id") or user.get("sub") or user.get("user_id") or str(uuid.uuid4()))
@@ -1289,9 +1308,7 @@ email = user.get("email") or (user.get("user_metadata") or {}).get("email") or "
 if not _read_courses_file(user_id) and "_show_welcome_courses_modal" not in st.session_state:
     st.session_state["_show_welcome_courses_modal"] = True
 
-# -----------------------
 # State Flags & Safe Dialog Launchers
-# -----------------------
 if "_open_add_modal" not in st.session_state:
     st.session_state["_open_add_modal"] = False
 if "_open_manage_courses" not in st.session_state:
@@ -1312,7 +1329,7 @@ if st.session_state.get("_open_manage_courses", False):
     show_manage_courses_dialog(user_id)
 
 # -----------------------
-# Top Header Bar (Full Width & Unclipped Email Display)
+# Main Dashboard Workspace
 # -----------------------
 col_header_left, col_header_right = st.columns([1.0, 4.0])
 
@@ -1354,27 +1371,18 @@ with col_header_right:
             unsafe_allow_html=True,
         )
 
-# -----------------------
-# Calendar Banner Box
-# -----------------------
 today_str = datetime.today().strftime("%A, %B %d, %Y")
 st.markdown(
     f'<div class="calendar-banner-box">📅 Today\'s Date: {today_str}</div>',
     unsafe_allow_html=True,
 )
 
-# -----------------------
-# Search & Sort Toolbar
-# -----------------------
 col_search, col_sort = st.columns([3, 1.5])
 with col_search:
     search_q = st.text_input("Search tasks or subjects...", key="main_search", label_visibility="collapsed", placeholder="Search tasks or subjects...")
 with col_sort:
     sort_by = st.selectbox("Sort By:", SORT_OPTIONS, index=0, key="main_sort")
 
-# -----------------------
-# Assignment Cards Grid (User Isolated)
-# -----------------------
 if "df_cached" not in st.session_state:
     st.session_state.df_cached = fetch_assignments(user_id)
 
