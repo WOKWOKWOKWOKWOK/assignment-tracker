@@ -1,19 +1,19 @@
 """
-Assignment Tracker — Full Persisted Terminal Interface & Supabase Sync
+Assignment Tracker — AI Weekly Schedule & 1-10 Importance Rating System
 
 Features:
-- Completely separated "Assignments" (Homework, Essays, etc.) and "Tests & Quizzes" tabs
-- Terminal-style full-page authentication UI matching the dual-card stacked design
-- Native single-table Supabase persistence (`assignments`)
-- Auto-domain appending (@simsburyschools.net) with custom domain override support
-- Full dark mode theme, hidden sidebar, and responsive assignment grid
+- AI Smart Planner that balances your weekly schedule & due dates
+- 1-10 Importance rating sliders replacing Low/Medium/High
+- Dedicated tabs for Assignments, Tests & Quizzes, and Weekly AI Schedule
+- Clean UI without search/sort clutter
+- 100% Supabase Cloud persistence
 """
 
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -40,6 +40,7 @@ try:
 except Exception:
     Client = None
     create_client = None  # type: ignore
+
 
 # -----------------------
 # Streamlit Rerun & Dialog Helper
@@ -68,10 +69,11 @@ else:
 
 
 # -----------------------
-# Config / persistence
+# Config / Persistence
 # -----------------------
 DATA_FILE = Path("data.json")
 COURSES_FILE = Path("courses.json")
+SCHEDULE_FILE = Path("schedule.json")
 DEFAULT_DOMAIN = "@simsburyschools.net"
 
 try:
@@ -89,14 +91,8 @@ if SUPABASE_URL and SUPABASE_KEY and create_client:
         sb = None
 
 STATUS_OPTIONS = ["Not Started", "In Progress", "Done"]
-PRIORITY_OPTIONS = ["Low", "Medium", "High"]
-TYPE_OPTIONS = ["Essay", "Presentation", "Homework", "Test & Quizzes", "Other"]
-SORT_OPTIONS = [
-    "Spreadsheet Default Order",
-    "Due Date (Soonest)",
-    "Priority (High → Low)",
-    "Created (Newest)",
-]
+TYPE_OPTIONS = ["Homework", "Essay", "Presentation", "Test & Quizzes", "Other"]
+DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 st.set_page_config(page_title="Assignment Tracker", page_icon="📋", layout="wide", initial_sidebar_state="collapsed")
 
@@ -104,6 +100,17 @@ st.set_page_config(page_title="Assignment Tracker", page_icon="📋", layout="wi
 # -----------------------
 # Utility Helpers & Schema Encoding
 # -----------------------
+def _clean_priority(val: Any) -> int:
+    """Converts legacy string priorities or raw inputs into a clean 1-10 integer."""
+    if isinstance(val, (int, float)):
+        return max(1, min(10, int(val)))
+    val_str = str(val).strip()
+    if val_str.isdigit():
+        return max(1, min(10, int(val_str)))
+    mapping = {"High": 9, "Medium": 5, "Low": 2}
+    return mapping.get(val_str, 5)
+
+
 def _to_dict(obj: Any) -> Optional[Dict[str, Any]]:
     if obj is None:
         return None
@@ -150,12 +157,14 @@ def _wrap_result(res: Any) -> Dict[str, Any]:
 
 
 def get_courses_config_id(user_id: str) -> str:
-    """Generates a deterministic RFC UUID for the user's Cloud Course Config record."""
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_courses_config_{user_id}"))
 
 
+def get_schedule_config_id(user_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_schedule_config_{user_id}"))
+
+
 def _pack_notes(notes_text: str, prev_status: str) -> str:
-    """Packs auxiliary state cleanly into notes payload."""
     return json.dumps({
         "text": notes_text,
         "prev_status": prev_status
@@ -163,7 +172,6 @@ def _pack_notes(notes_text: str, prev_status: str) -> str:
 
 
 def _unpack_notes(raw_notes: Any) -> Tuple[str, str]:
-    """Extracts text notes and previous status with fallback."""
     if not raw_notes:
         return ("", "Not Started")
     try:
@@ -179,7 +187,7 @@ def _unpack_notes(raw_notes: Any) -> Tuple[str, str]:
 
 
 # -----------------------
-# Auth Helpers (Supabase)
+# Auth Helpers
 # -----------------------
 def sign_up(email: str, password: str) -> Dict[str, Any]:
     auth = getattr(sb, "auth", None) if sb else None
@@ -331,7 +339,7 @@ def current_user() -> Optional[Dict[str, Any]]:
 
 
 # -----------------------
-# Supabase Cloud & Local Persistence Helpers
+# Cloud Persistence Helpers
 # -----------------------
 def invalidate_cache():
     if "df_cached" in st.session_state:
@@ -358,7 +366,6 @@ def _write_data_file(rows: List[Dict[str, Any]]) -> None:
 
 
 def _read_courses_file(user_id: str) -> List[str]:
-    """Reads course list directly from Supabase Cloud `assignments` table."""
     courses_list = []
     cfg_id = get_courses_config_id(user_id)
 
@@ -374,27 +381,12 @@ def _read_courses_file(user_id: str) -> List[str]:
         except Exception:
             pass
 
-    if not courses_list and sb and user_id:
-        try:
-            res = sb.table("assignments").select("course").eq("user_id", user_id).neq("title", "__SYSTEM_COURSES__").execute()
-            if res and hasattr(res, "data") and res.data:
-                c_set = set()
-                for r in res.data:
-                    c = r.get("course")
-                    if isinstance(c, str) and c.strip() and c != "CONFIG":
-                        c_set.add(c.strip().upper())
-                courses_list = sorted(list(c_set))
-        except Exception:
-            pass
-
     if not courses_list and COURSES_FILE.exists() and user_id:
         try:
             with COURSES_FILE.open("r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
                     courses_list = data.get(user_id, [])
-                elif isinstance(data, list):
-                    courses_list = data
         except Exception:
             pass
 
@@ -402,12 +394,9 @@ def _read_courses_file(user_id: str) -> List[str]:
 
 
 def _write_courses_file(user_id: str, courses: List[str]) -> None:
-    """Saves course list directly to Supabase Cloud `assignments` table."""
     if not user_id:
         return
-
     cfg_id = get_courses_config_id(user_id)
-
     if sb:
         try:
             sb.table("assignments").upsert({
@@ -421,34 +410,56 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
         except Exception as err:
             st.error(f"Supabase write error: {err}")
 
-    try:
-        all_courses = {}
-        if COURSES_FILE.exists():
-            try:
-                with COURSES_FILE.open("r", encoding="utf-8") as f:
-                    existing = json.load(f)
-                    if isinstance(existing, dict):
-                        all_courses = existing
-            except Exception:
-                all_courses = {}
-        all_courses[user_id] = courses
-        with COURSES_FILE.open("w", encoding="utf-8") as f:
-            json.dump(all_courses, f, indent=2)
-    except Exception:
-        pass
+
+def _read_schedule_file(user_id: str) -> List[Dict[str, Any]]:
+    """Fetches user weekly schedule from Supabase."""
+    cfg_id = get_schedule_config_id(user_id)
+    if sb and user_id:
+        try:
+            res = sb.table("assignments").select("notes").eq("id", cfg_id).execute()
+            if res and hasattr(res, "data") and res.data:
+                raw_notes = res.data[0].get("notes")
+                if raw_notes:
+                    return json.loads(raw_notes)
+        except Exception:
+            pass
+    return []
+
+
+def _write_schedule_file(user_id: str, schedule: List[Dict[str, Any]]) -> None:
+    """Saves user weekly schedule to Supabase."""
+    if not user_id:
+        return
+    cfg_id = get_schedule_config_id(user_id)
+    if sb:
+        try:
+            sb.table("assignments").upsert({
+                "id": cfg_id,
+                "user_id": user_id,
+                "title": "__SYSTEM_SCHEDULE__",
+                "course": "CONFIG",
+                "notes": json.dumps(schedule),
+                "created_at": datetime.utcnow().isoformat()
+            }).execute()
+        except Exception as err:
+            st.error(f"Supabase write error: {err}")
 
 
 def fetch_assignments(user_id: str) -> pd.DataFrame:
-    """Fetches user assignments from Supabase Cloud (filtering out config records)."""
-    cfg_id = get_courses_config_id(user_id)
+    """Fetches user assignments from Supabase Cloud (filtering out system configs)."""
+    cfg_course_id = get_courses_config_id(user_id)
+    cfg_sched_id = get_schedule_config_id(user_id)
     rows = []
 
     if sb and user_id:
         try:
-            res = sb.table("assignments").select("*").eq("user_id", user_id).neq("title", "__SYSTEM_COURSES__").execute()
+            res = sb.table("assignments").select("*").eq("user_id", user_id)\
+                    .neq("title", "__SYSTEM_COURSES__")\
+                    .neq("title", "__SYSTEM_SCHEDULE__").execute()
             if res and hasattr(res, "data") and res.data:
                 for r in res.data:
-                    if str(r.get("id")) == cfg_id:
+                    rid = str(r.get("id"))
+                    if rid in (cfg_course_id, cfg_sched_id):
                         continue
 
                     n_text, prev_st = _unpack_notes(r.get("notes"))
@@ -457,20 +468,20 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
                     if isinstance(raw_course, list) and len(raw_course) > 0:
                         course_str = str(raw_course[0])
                     elif isinstance(raw_course, dict):
-                        course_str = str(raw_course.get("name") or raw_course.get("title") or "GENERAL")
+                        course_str = str(raw_course.get("name") or "GENERAL")
                     elif isinstance(raw_course, str):
                         course_str = raw_course
                     else:
-                        course_str = str(raw_course) if raw_course else "GENERAL"
+                        course_str = "GENERAL"
 
                     rows.append({
-                        "id": str(r.get("id")),
+                        "id": rid,
                         "user_id": str(r.get("user_id")),
                         "title": r.get("title") or "",
                         "course": course_str.strip().upper(),
                         "due_date": r.get("due_date") or "",
                         "status": r.get("status") or "Not Started",
-                        "priority": r.get("priority") or "Medium",
+                        "priority": _clean_priority(r.get("priority")),
                         "atype": r.get("atype") or "Homework",
                         "eta": r.get("eta") or "",
                         "created_at": r.get("created_at") or "",
@@ -481,44 +492,19 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
             st.error(f"Supabase fetch error: {err}")
 
     if not rows:
-        local_rows = _read_data_file()
-        if isinstance(local_rows, list):
-            for r in local_rows:
-                if str(r.get("user_id")) == str(user_id) and r.get("title") != "__SYSTEM_COURSES__":
-                    n_text, prev_st = _unpack_notes(r.get("notes"))
-                    rows.append({
-                        "id": str(r.get("id")),
-                        "user_id": str(r.get("user_id")),
-                        "title": r.get("title") or "",
-                        "course": str(r.get("course") or "GENERAL").strip().upper(),
-                        "due_date": r.get("due_date") or "",
-                        "status": r.get("status") or "Not Started",
-                        "priority": r.get("priority") or "Medium",
-                        "atype": r.get("atype") or "Homework",
-                        "eta": r.get("eta") or "",
-                        "created_at": r.get("created_at") or "",
-                        "notes": n_text,
-                        "prev_status": prev_st
-                    })
-
-    if not rows:
         return pd.DataFrame(columns=[
             "id", "user_id", "title", "course", "due_date", "status", "priority",
             "atype", "eta", "created_at", "notes", "prev_status"
         ])
 
     df = pd.DataFrame(rows)
-    for c in [
-        "id", "user_id", "title", "course", "due_date", "status", "priority",
-        "atype", "eta", "created_at", "notes", "prev_status"
-    ]:
+    for c in ["id", "user_id", "title", "course", "due_date", "status", "priority", "atype", "eta", "created_at", "notes", "prev_status"]:
         if c not in df.columns:
             df[c] = ""
     return df
 
 
 def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
-    """Upserts assignments directly into Supabase Cloud `assignments` table while preserving notes and eta."""
     if not rows_to_upsert:
         return
 
@@ -532,7 +518,7 @@ def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
         clean["title"] = str(clean.get("title", "")).strip() or "Untitled Assignment"
         clean["course"] = str(clean.get("course", "GENERAL")).strip() or "GENERAL"
         clean["status"] = clean.get("status", "Not Started")
-        clean["priority"] = clean.get("priority", "Medium")
+        clean["priority"] = _clean_priority(clean.get("priority"))
         clean["atype"] = clean.get("atype", "Homework")
         clean["eta"] = str(clean.get("eta", "")).strip()
         clean["notes"] = str(clean.get("notes", "")).strip()
@@ -540,15 +526,7 @@ def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
         clean["user_id"] = clean.get("user_id", "")
         clean["created_at"] = clean.get("created_at") or datetime.utcnow().isoformat()
 
-        if rid in by_id:
-            existing = by_id[rid]
-            if isinstance(existing, dict):
-                for key, value in clean.items():
-                    if value is not None:
-                        existing[key] = value
-            by_id[rid] = existing
-        else:
-            by_id[rid] = clean
+        by_id[rid] = clean
 
         db_row = {
             "id": rid,
@@ -621,13 +599,13 @@ def on_status_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
 
 def on_priority_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
     new_prio = st.session_state.get(widget_key)
-    if new_prio:
-        row_dict["priority"] = new_prio
+    if new_prio is not None:
+        row_dict["priority"] = int(new_prio)
         upsert_assignments([row_dict])
 
 
 # -----------------------
-# Date / Sort Helpers
+# Date Helpers
 # -----------------------
 def parse_date_iso_or_empty(s: Any) -> Optional[date]:
     if s is None:
@@ -666,20 +644,70 @@ def days_left(d: Optional[date]) -> Tuple[str, int]:
     return (f"{delta}d left", delta)
 
 
-def sort_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
-    if df.empty:
-        return df
-    if sort_by == "Due Date (Soonest)":
-        df["due_parsed"] = df["due_date"].apply(parse_date_iso_or_empty)
-        return df.sort_values(by=["due_parsed"], na_position="last").drop(columns=["due_parsed"])
-    if sort_by == "Priority (High → Low)":
-        order = {"High": 0, "Medium": 1, "Low": 2, "": 3}
-        df["p_rank"] = df["priority"].map(lambda v: order.get(str(v), 3))
-        return df.sort_values(by=["p_rank"]).drop(columns=["p_rank"])
-    if sort_by == "Created (Newest)":
-        df["created_at_parsed"] = pd.to_datetime(df["created_at"], errors="coerce")
-        return df.sort_values(by=["created_at_parsed"], ascending=False).drop(columns=["created_at_parsed"])
-    return df
+# -----------------------
+# AI Planner Engine Algorithm
+# -----------------------
+def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    AI Logic: Analyzes open assignments, their 1-10 importance rating, due dates,
+    and user's free blocks to construct an optimal study agenda for the next 7 days.
+    """
+    incomplete = df_tasks[df_tasks["status"] != "Done"].copy()
+    if incomplete.empty:
+        return {}
+
+    today = date.today()
+    task_queue = []
+
+    for _, row in incomplete.iterrows():
+        due_d = parse_date_iso_or_empty(row.get("due_date")) or (today + timedelta(days=7))
+        days_until = max(1, (due_d - today).days)
+        importance = _clean_priority(row.get("priority"))
+
+        # AI Scoring Algorithm: Urgency (due date weight) * Importance (1-10 slider)
+        urgency_multiplier = 10.0 / days_until
+        ai_score = importance * urgency_multiplier
+
+        eta_str = str(row.get("eta") or "30 mins").lower()
+        eta_mins = 45
+        if "hr" in eta_str or "hour" in eta_str:
+            try:
+                nums = ''.join(c for c in eta_str.split("h")[0] if c.isdigit() or c == '.')
+                eta_mins = int(float(nums) * 60)
+            except Exception:
+                eta_mins = 60
+        elif "min" in eta_str:
+            try:
+                nums = ''.join(c for c in eta_str if c.isdigit())
+                eta_mins = int(nums)
+            except Exception:
+                eta_mins = 30
+
+        task_queue.append({
+            "id": row.get("id"),
+            "title": row.get("title"),
+            "course": row.get("course"),
+            "atype": row.get("atype"),
+            "due_date": due_d.strftime("%a %b %d"),
+            "importance": importance,
+            "score": ai_score,
+            "eta_mins": eta_mins,
+            "days_until": days_until
+        })
+
+    # Sort queue by AI priority score descending
+    task_queue.sort(key=lambda x: x["score"], reverse=True)
+
+    # Distribute tasks into a 7-day timeline
+    plan = {DAYS_OF_WEEK[(today.weekday() + i) % 7]: [] for i in range(7)}
+
+    for t in task_queue:
+        # Schedule task on the optimal day prior to due date
+        best_day_offset = min(t["days_until"] - 1, 6)
+        assigned_day = DAYS_OF_WEEK[(today.weekday() + best_day_offset) % 7]
+        plan[assigned_day].append(t)
+
+    return plan
 
 
 # -----------------------
@@ -696,12 +724,12 @@ st.markdown(
     }
 
     .main .block-container {
-        padding-top: 2rem !important;
+        padding-top: 1.5rem !important;
         padding-bottom: 3rem !important;
         max-width: 1440px;
     }
 
-    /* Completely Hide Streamlit Sidebar & Sidebar Toggle Button */
+    /* Hide Streamlit Sidebar Controls */
     section[data-testid="stSidebar"],
     div[data-testid="collapsedControl"],
     button[data-testid="stSidebarCollapseButton"] {
@@ -713,7 +741,7 @@ st.markdown(
         gap: 8px;
         background-color: transparent;
         border-bottom: 1px solid #1e293b;
-        margin-bottom: 18px;
+        margin-bottom: 22px;
     }
 
     .stTabs [data-baseweb="tab"] {
@@ -723,7 +751,7 @@ st.markdown(
         color: #94a3b8;
         font-weight: 600;
         font-size: 0.9rem;
-        padding: 8px 18px;
+        padding: 8px 20px;
         background-color: #0f172a;
         border: 1px solid #1e293b;
         border-bottom: none;
@@ -735,71 +763,34 @@ st.markdown(
         border-color: #4f46e5 !important;
     }
 
-    /* Header Cards Styling for Terminal Auth UI */
-    .auth-header-card {
-        background-color: #0c1322;
-        border: 1.5px solid #2563eb;
-        border-radius: 12px;
-        padding: 32px 24px;
-        text-align: center;
-        margin-bottom: 16px;
-        box-shadow: 0 4px 20px rgba(37, 99, 235, 0.15);
+    /* Card Box Container */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #0c1322 !important;
+        border: 1px solid #1e293b !important;
+        border-radius: 12px !important;
+        padding: 16px !important;
+        margin-bottom: 16px !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
-    .auth-header-title {
-        font-size: 2.2rem;
-        font-weight: 800;
-        color: #ffffff;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        letter-spacing: -0.02em;
+    /* Importance Badge Pill */
+    .importance-badge {
+        background-color: #311b92;
+        color: #d1c4e9;
+        border: 1px solid #512da8;
+        border-radius: 6px;
+        padding: 2px 8px;
+        font-weight: 700;
+        font-size: 0.78rem;
     }
 
-    .auth-header-subtitle {
-        font-size: 0.92rem;
-        color: #94a3b8;
-        margin-top: 8px;
-    }
-
-    /* Terminal Input Container Box */
-    .auth-form-card {
-        background-color: #0c1322;
-        border: 1px solid #1e293b;
-        border-radius: 12px;
-        padding: 24px 28px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    }
-
-    /* Custom Terminal Yellow/Dark Submit Button */
+    /* Custom Terminal Yellow Submit Button */
     button[key="auth_submit_btn"] {
         background-color: #1e293b !important;
         color: #fbbf24 !important;
         border: 1px solid #334155 !important;
         border-radius: 8px !important;
         font-weight: 700 !important;
-        font-size: 0.9rem !important;
-        padding: 8px 16px !important;
-        margin-top: 10px !important;
-        width: max-content !important;
-    }
-
-    button[key="auth_submit_btn"]:hover {
-        background-color: #334155 !important;
-        border-color: #fbbf24 !important;
-    }
-
-    /* Auto-flex Grid Layout across all screens */
-    div[data-testid="stHorizontalBlock"] {
-        display: flex !important;
-        flex-wrap: wrap !important;
-        gap: 12px !important;
-    }
-
-    div[data-testid="column"] {
-        min-width: 330px !important;
-        flex: 1 1 330px !important;
     }
 
     /* Header Title Styling */
@@ -808,9 +799,6 @@ st.markdown(
         font-weight: 900;
         color: #ffffff;
         margin: 0;
-        display: flex;
-        align-items: center;
-        gap: 8px;
         letter-spacing: -0.02em;
     }
 
@@ -818,73 +806,6 @@ st.markdown(
         font-size: 0.88rem;
         color: #64748b;
         margin-top: 4px;
-    }
-
-    /* Unclipped User Email Pill */
-    .status-engine-pill {
-        background-color: #0f172a;
-        border: 1px solid #1e293b;
-        border-radius: 20px;
-        padding: 6px 14px;
-        font-size: 0.82rem;
-        color: #94a3b8;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-weight: 500;
-        white-space: nowrap !important;
-        overflow: visible !important;
-        width: max-content !important;
-    }
-
-    .green-dot {
-        width: 8px;
-        height: 8px;
-        background-color: #10b981;
-        border-radius: 50%;
-        display: inline-block;
-    }
-
-    /* Force All Streamlit Buttons To Display Unclipped Text */
-    .stButton > button {
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-        font-size: 0.82rem !important;
-        padding: 5px 10px !important;
-        width: 100% !important;
-    }
-
-    button[key="toolbar_clear"] {
-        background-color: #064e3b !important;
-        color: #34d399 !important;
-        border: 1px solid #059669 !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-    }
-
-    button[key="toolbar_add"] {
-        background-color: #4f46e5 !important;
-        color: #ffffff !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-    }
-
-    button[key="toolbar_courses"] {
-        background-color: #1e293b !important;
-        color: #818cf8 !important;
-        border: 1px solid #312e81 !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-    }
-
-    button[key="toolbar_signout"] {
-        background-color: #450a0a !important;
-        color: #fca5a5 !important;
-        border: 1px solid #9f1239 !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
     }
 
     /* Calendar Banner Box */
@@ -897,45 +818,10 @@ st.markdown(
         color: #818cf8;
         font-weight: 600;
         font-size: 0.95rem;
-        margin: 16px 0 20px 0;
+        margin: 12px 0 20px 0;
     }
 
-    /* Card Box Container */
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #0f172a !important;
-        border: 1px solid #1e293b !important;
-        border-radius: 12px !important;
-        padding: 14px !important;
-        margin-bottom: 16px !important;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-    }
-
-    /* Edit Button Styling inside Card */
-    button[key^="edit_btn_"], button[key*="_edit_btn_"] {
-        padding: 2px 8px !important;
-        font-size: 0.8rem !important;
-        min-height: 32px !important;
-        background-color: #1e1b4b !important;
-        border: 1px solid #312e81 !important;
-        color: #818cf8 !important;
-        border-radius: 6px !important;
-        min-width: 58px !important;
-    }
-
-    /* Circular Completion Checkbox */
-    div[data-testid="stCheckbox"] {
-        margin-top: 4px;
-    }
-
-    div[data-testid="stCheckbox"] input[type="checkbox"] {
-        border-radius: 50% !important;
-        width: 18px;
-        height: 18px;
-        accent-color: #10b981;
-        cursor: pointer;
-    }
-
-    /* Subject Badge Pill */
+    /* Course Badge Pill */
     .course-badge {
         background-color: #1e1b4b;
         color: #818cf8;
@@ -946,7 +832,6 @@ st.markdown(
         font-size: 0.75rem;
         letter-spacing: 0.04em;
         display: inline-block;
-        white-space: nowrap !important;
     }
 
     .card-title {
@@ -955,16 +840,12 @@ st.markdown(
         color: #ffffff;
         margin-top: 10px;
         margin-bottom: 2px;
-        letter-spacing: -0.02em;
     }
 
     .card-type {
         color: #f43f5e;
         font-size: 0.82rem;
         font-weight: 600;
-        display: flex;
-        align-items: center;
-        gap: 4px;
         margin-bottom: 8px;
     }
 
@@ -978,11 +859,6 @@ st.markdown(
         color: #94a3b8;
         font-size: 0.82rem;
         font-weight: 500;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-top: 4px;
-        white-space: nowrap !important;
     }
 
     .days-badge {
@@ -992,72 +868,36 @@ st.markdown(
         padding: 2px 6px;
         font-size: 0.75rem;
         font-weight: 600;
-        white-space: nowrap !important;
     }
 
     .prio-label {
-        color: #64748b;
-        font-size: 0.72rem;
+        color: #818cf8;
+        font-size: 0.75rem;
         font-weight: 700;
         letter-spacing: 0.05em;
-        text-align: right;
-        margin-top: 8px;
-        white-space: nowrap !important;
-    }
-
-    /* Selectbox Overrides */
-    div[data-baseweb="select"] {
-        border-radius: 8px !important;
-        font-size: 0.82rem !important;
-        min-width: 110px !important;
-    }
-
-    div[data-baseweb="select"] > div {
-        padding-left: 6px !important;
-        padding-right: 20px !important;
-        white-space: nowrap !important;
-    }
-
-    .status-not-started div[data-baseweb="select"] {
-        background-color: #2a0812 !important;
-        border: 1px solid #9f1239 !important;
-        color: #fca5a5 !important;
-    }
-
-    .status-in-progress div[data-baseweb="select"] {
-        background-color: #2e1b04 !important;
-        border: 1px solid #854d0e !important;
-        color: #fde047 !important;
-    }
-
-    .status-done div[data-baseweb="select"] {
-        background-color: #032b1d !important;
-        border: 1px solid #065f46 !important;
-        color: #34d399 !important;
-    }
-
-    .prio-low div[data-baseweb="select"] {
-        border: 1px solid #059669 !important;
-        color: #34d399 !important;
-        background-color: #022c22 !important;
-    }
-
-    .prio-medium div[data-baseweb="select"] {
-        border: 1px solid #d97706 !important;
-        color: #fde047 !important;
-        background-color: #2e1b04 !important;
-    }
-
-    .prio-high div[data-baseweb="select"] {
-        border: 1px solid #dc2626 !important;
-        color: #fca5a5 !important;
-        background-color: #2a0812 !important;
     }
 
     .meta-row {
         color: #94a3b8;
         font-size: 0.8rem;
         margin-top: 4px;
+    }
+
+    .ai-day-card {
+        background-color: #0c1322;
+        border: 1px solid #1e293b;
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 12px;
+    }
+
+    .ai-day-title {
+        color: #38bdf8;
+        font-size: 1rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 4px;
     }
     </style>
     """,
@@ -1066,7 +906,7 @@ st.markdown(
 
 
 # -----------------------
-# Terminal Auth Interface (Full Screen Stacked Cards)
+# Terminal Auth Interface
 # -----------------------
 def render_terminal_auth_page():
     c_left, c_center, c_right = st.columns([1, 1.8, 1])
@@ -1074,15 +914,15 @@ def render_terminal_auth_page():
     with c_center:
         st.markdown(
             """
-            <div class="auth-header-card">
-                <div class="auth-header-title">🛡️ Assignment Tracker</div>
-                <div class="auth-header-subtitle">Simsbury High School Assignment Portal</div>
+            <div style="background-color: #0c1322; border: 1.5px solid #2563eb; border-radius: 12px; padding: 32px 24px; text-align: center; margin-bottom: 16px;">
+                <div style="font-size: 2.2rem; font-weight: 800; color: #ffffff;">🛡️ Assignment Tracker</div>
+                <div style="font-size: 0.92rem; color: #94a3b8; margin-top: 8px;">Simsbury High School Assignment Portal</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        st.markdown('<div class="auth-form-card">', unsafe_allow_html=True)
+        st.markdown('<div style="background-color: #0c1322; border: 1px solid #1e293b; border-radius: 12px; padding: 24px 28px;">', unsafe_allow_html=True)
 
         mode = st.radio("Action Mode", ["Sign In", "Sign Up"], horizontal=True, label_visibility="collapsed", key="terminal_mode")
 
@@ -1093,7 +933,6 @@ def render_terminal_auth_page():
         )
 
         password = st.text_input("Password:", type="password", key="terminal_pw")
-
         typed_user = raw_user_input.strip()
         btn_label = "🔑 Sign In to Terminal" if mode == "Sign In" else "📝 Register Account"
 
@@ -1146,8 +985,13 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
         st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found in this view.</div>", unsafe_allow_html=True)
         return
 
+    # Sort strictly by Due Date (soonest) then Importance (highest 10 -> 1)
+    df_sorted = df_grid.copy()
+    df_sorted["due_parsed"] = df_sorted["due_date"].apply(parse_date_iso_or_empty)
+    df_sorted = df_sorted.sort_values(by=["due_parsed", "priority"], ascending=[True, False]).drop(columns=["due_parsed"])
+
     cards_per_row = 3
-    chunked_rows = [df_grid.iloc[i:i + cards_per_row] for i in range(0, len(df_grid), cards_per_row)]
+    chunked_rows = [df_sorted.iloc[i:i + cards_per_row] for i in range(0, len(df_sorted), cards_per_row)]
 
     for row_df in chunked_rows:
         cols = st.columns(cards_per_row)
@@ -1157,26 +1001,14 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                     aid = row.get("id")
                     title = row.get("title") or "Untitled"
                     course = (row.get("course") or "MATH").upper()
-                    atype = row.get("atype") or "Essay"
+                    atype = row.get("atype") or "Homework"
                     due_d = parse_date_iso_or_empty(row.get("due_date"))
                     due_text = format_mdy(due_d)
                     days_text, _ = days_left(due_d)
 
                     status = st.session_state.get(f"{key_prefix}status_sel_{aid}") or row.get("status") or "Not Started"
-                    priority = row.get("priority") or "Low"
+                    importance_val = _clean_priority(row.get("priority"))
                     row_dict = row.to_dict()
-
-                    status_class = "status-not-started"
-                    if status == "In Progress":
-                        status_class = "status-in-progress"
-                    elif status == "Done":
-                        status_class = "status-done"
-
-                    prio_class = "prio-low"
-                    if priority == "Medium":
-                        prio_class = "prio-medium"
-                    elif priority == "High":
-                        prio_class = "prio-high"
 
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
 
@@ -1200,7 +1032,6 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                             safe_rerun()
 
                     with c_top4:
-                        st.markdown(f"<div class='{status_class}'>", unsafe_allow_html=True)
                         sel_key = f"{key_prefix}status_sel_{aid}"
                         st.selectbox(
                             "Status",
@@ -1211,44 +1042,39 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                             on_change=on_status_change,
                             args=(aid, row_dict, sel_key)
                         )
-                        st.markdown("</div>", unsafe_allow_html=True)
 
                     st.markdown(f"<div class='card-title'>{title}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='card-type'><span>📌</span> {atype}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='card-type'>📌 {atype}</div>", unsafe_allow_html=True)
                     st.markdown("<hr class='card-hr'/>", unsafe_allow_html=True)
 
                     c_bot1, c_bot2 = st.columns([1.5, 1.8])
                     with c_bot1:
                         st.markdown(
-                            f"<div class='due-date-text'><span>📅</span> {due_text} <span class='days-badge'>{days_text}</span></div>",
+                            f"<div class='due-date-text'>📅 {due_text} <span class='days-badge'>{days_text}</span></div>",
                             unsafe_allow_html=True,
                         )
                     with c_bot2:
-                        prio_col1, prio_col2 = st.columns([0.9, 1.5])
-                        with prio_col1:
-                            st.markdown("<div class='prio-label'>PRIORITY:</div>", unsafe_allow_html=True)
-                        with prio_col2:
-                            st.markdown(f"<div class='{prio_class}'>", unsafe_allow_html=True)
-                            prio_key = f"{key_prefix}prio_sel_{aid}"
-                            st.selectbox(
-                                "Priority",
-                                PRIORITY_OPTIONS,
-                                index=PRIORITY_OPTIONS.index(priority) if priority in PRIORITY_OPTIONS else 0,
-                                key=prio_key,
-                                label_visibility="collapsed",
-                                on_change=on_priority_change,
-                                args=(aid, row_dict, prio_key)
-                            )
-                            st.markdown("</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='prio-label'>IMPORTANCE: {importance_val}/10</div>", unsafe_allow_html=True)
+                        prio_key = f"{key_prefix}prio_sel_{aid}"
+                        st.slider(
+                            "Importance",
+                            min_value=1,
+                            max_value=10,
+                            value=importance_val,
+                            key=prio_key,
+                            label_visibility="collapsed",
+                            on_change=on_priority_change,
+                            args=(aid, row_dict, prio_key)
+                        )
 
                     eta = str(row.get("eta") or "").strip()
                     notes = str(row.get("notes") or "").strip()
 
                     if eta:
-                        st.markdown(f"<div class='meta-row'>⏱️ {eta}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='meta-row'>⏱️ Duration: {eta}</div>", unsafe_allow_html=True)
 
                     if notes:
-                        note_preview = notes if len(notes) <= 140 else notes[:137] + "..."
+                        note_preview = notes if len(notes) <= 120 else notes[:117] + "..."
                         st.markdown(f"<div class='meta-row'>📝 {note_preview}</div>", unsafe_allow_html=True)
 
 
@@ -1260,10 +1086,10 @@ def show_welcome_courses_dialog(user_id: str):
     st.session_state["_show_welcome_courses_modal"] = False
 
     st.markdown("### 🎓 Welcome to Assignment Tracker!")
-    st.write("Please list the subjects or classes you are taking this term (comma separated or line by line):")
+    st.write("Please list the subjects or classes you are taking this term:")
 
     courses_input = st.text_area(
-        "Enter your classes:",
+        "Enter your classes (comma separated):",
         value="MATH, SCIENCE, ENGLISH, HISTORY",
         help="Example: MATH, SCIENCE, SPANISH, AP PHYSICS"
     )
@@ -1274,24 +1100,25 @@ def show_welcome_courses_dialog(user_id: str):
             _write_courses_file(user_id, parsed_courses)
             st.success("Classes saved successfully!")
             safe_rerun()
-        else:
-            st.warning("Please enter at least one class.")
 
 
 @dialog_decorator("Create New Assignment")
 def show_add_assignment_dialog(user_id: str):
     st.session_state["_open_add_modal"] = False
-
     courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+
     with st.form("add_assignment_form"):
         title = st.text_input("Assignment Name", key="add_title")
         course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key="add_course_choice")
         course_free = st.text_input("Or type a new course name", value="", key="add_course_free")
         status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
         due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
-        priority = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_priority")
+        
+        # 1-10 Importance Slider
+        importance = st.slider("Importance / Priority Level (1 = Low, 10 = Critical)", min_value=1, max_value=10, value=5, key="add_prio_slider")
+        
         atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
-        eta = st.text_input("Estimated Duration (e.g., 30 mins)", key="add_eta")
+        eta = st.text_input("Estimated Duration (e.g., 45 mins, 2 hours)", key="add_eta")
         notes = st.text_area("Notes", value="", key="add_notes")
         submitted_add = st.form_submit_button("Add Assignment")
 
@@ -1304,7 +1131,7 @@ def show_add_assignment_dialog(user_id: str):
                 "course": course_val.strip(),
                 "due_date": due.isoformat() if isinstance(due, date) else None,
                 "status": status,
-                "priority": priority,
+                "priority": importance,
                 "atype": atype,
                 "eta": eta.strip(),
                 "created_at": datetime.utcnow().isoformat(),
@@ -1332,8 +1159,8 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
         return
 
     st.session_state["_edit_assignment_id"] = ""
-
     courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
+
     with st.form("edit_assignment_form"):
         title = st.text_input("Assignment Name", value=assignment_record.get("title", ""), key=f"edit_title_{aid}")
         course_choice = st.selectbox(
@@ -1351,12 +1178,16 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
         )
         due_parsed = parse_date_iso_or_empty(assignment_record.get("due_date")) or date.today()
         due = st.date_input("Due Date (MM/DD/YYYY)", value=due_parsed, key=f"edit_due_{aid}")
-        priority = st.selectbox(
-            "Priority Level",
-            PRIORITY_OPTIONS,
-            index=(PRIORITY_OPTIONS.index(assignment_record.get("priority")) if assignment_record.get("priority") in PRIORITY_OPTIONS else 1),
-            key=f"edit_priority_{aid}",
+        
+        # 1-10 Importance Slider
+        importance = st.slider(
+            "Importance Level (1-10)",
+            min_value=1,
+            max_value=10,
+            value=_clean_priority(assignment_record.get("priority")),
+            key=f"edit_prio_slider_{aid}"
         )
+        
         atype = st.selectbox(
             "Assignment Type",
             TYPE_OPTIONS,
@@ -1381,7 +1212,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
                 "course": course_val.strip(),
                 "due_date": due.isoformat() if isinstance(due, date) else None,
                 "status": status,
-                "priority": priority,
+                "priority": importance,
                 "atype": atype,
                 "eta": eta.strip(),
                 "notes": notes.strip(),
@@ -1396,11 +1227,9 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
             safe_rerun()
 
 
-@dialog_decorator("Manage / Change Courses")
+@dialog_decorator("Manage Courses")
 def show_manage_courses_dialog(user_id: str):
     st.session_state["_open_manage_courses"] = False
-
-    st.subheader("📚 Your Active Classes")
     courses = _read_courses_file(user_id)
     to_remove = []
 
@@ -1412,8 +1241,6 @@ def show_manage_courses_dialog(user_id: str):
             with col_b:
                 if st.button("Remove", key=f"remove_course_{i}"):
                     to_remove.append(c)
-    else:
-        st.info("No active classes found. Add your subjects below.")
 
     if to_remove:
         courses = [c for c in courses if c not in to_remove]
@@ -1424,13 +1251,10 @@ def show_manage_courses_dialog(user_id: str):
     new_course = st.text_input("Add a new course", key="new_course_field", placeholder="e.g. AP CALCULUS")
     if st.button("Add Course", key="add_course_button"):
         v = new_course.strip().upper()
-        if v:
-            if v not in courses:
-                courses.append(v)
-                _write_courses_file(user_id, courses)
-                safe_rerun()
-            else:
-                st.warning("That class already exists.")
+        if v and v not in courses:
+            courses.append(v)
+            _write_courses_file(user_id, courses)
+            safe_rerun()
 
 
 # -----------------------
@@ -1468,10 +1292,11 @@ if st.session_state.get("_edit_assignment_id"):
 if st.session_state.get("_open_manage_courses", False):
     show_manage_courses_dialog(user_id)
 
+
 # -----------------------
-# Main Dashboard Workspace
+# Main Dashboard Header
 # -----------------------
-col_header_left, col_header_right = st.columns([1.0, 4.0])
+col_header_left, col_header_right = st.columns([1.2, 3.8])
 
 with col_header_left:
     st.markdown(
@@ -1507,7 +1332,7 @@ with col_header_right:
             sign_out()
     with btn_col5:
         st.markdown(
-            f'<div class="status-engine-pill"><span class="green-dot"></span> {email}</div>',
+            f'<div style="background-color:#0f172a; border:1px solid #1e293b; border-radius:20px; padding:6px 14px; font-size:0.82rem; color:#94a3b8; display:inline-flex; align-items:center; gap:6px;">🟢 {email}</div>',
             unsafe_allow_html=True,
         )
 
@@ -1517,32 +1342,104 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-col_search, col_sort = st.columns([3, 1.5])
-with col_search:
-    search_q = st.text_input("Search tasks or subjects...", key="main_search", label_visibility="collapsed", placeholder="Search tasks or subjects...")
-with col_sort:
-    sort_by = st.selectbox("Sort By:", SORT_OPTIONS, index=0, key="main_sort")
-
 if "df_cached" not in st.session_state:
     st.session_state.df_cached = fetch_assignments(user_id)
 
-df = st.session_state.df_cached.copy()
-
-if search_q:
-    q = search_q.lower()
-    df = df[df.apply(lambda r: q in str(r.get("title", "")).lower() or q in str(r.get("course", "")).lower() or q in str(r.get("atype", "")).lower(), axis=1)]
-
-df = sort_df(df, sort_by)
+df_all = st.session_state.df_cached.copy()
 
 # -----------------------
-# Tabbed Assignment Display (Strictly Separated Views)
+# Navigation Tabs
 # -----------------------
-tab_assignments, tab_tests = st.tabs(["📋 Assignments", "🧪 Tests & Quizzes"])
+tab_assignments, tab_tests, tab_schedule = st.tabs([
+    "📋 Assignments", 
+    "🧪 Tests & Quizzes", 
+    "📅 Weekly Schedule & AI Planner"
+])
 
+# TAB 1: Regular Assignments
 with tab_assignments:
-    df_regular = df[df["atype"] != "Test & Quizzes"]
+    df_regular = df_all[df_all["atype"] != "Test & Quizzes"]
     render_assignment_grid(df_regular, key_prefix="reg_")
 
+# TAB 2: Tests & Quizzes Only
 with tab_tests:
-    df_tests = df[df["atype"] == "Test & Quizzes"]
+    df_tests = df_all[df_all["atype"] == "Test & Quizzes"]
     render_assignment_grid(df_tests, key_prefix="tests_")
+
+# TAB 3: Weekly Schedule & AI Auto-Planner
+with tab_schedule:
+    col_sched_left, col_sched_right = st.columns([1.2, 1.8])
+
+    user_schedule = _read_schedule_file(user_id)
+
+    with col_sched_left:
+        st.markdown("### 🕒 Add Weekly Commitments")
+        st.caption("Enter recurring events (e.g., Classes, Sports, Work) so the AI knows when you are busy.")
+
+        with st.form("add_schedule_event_form"):
+            s_day = st.selectbox("Day of Week", DAYS_OF_WEEK)
+            s_title = st.text_input("Event Name", placeholder="e.g. Soccer Practice, Math Class")
+            c_time1, c_time2 = st.columns(2)
+            with c_time1:
+                s_start = st.time_input("Start Time", value=datetime.strptime("15:30", "%H:%M").time())
+            with c_time2:
+                s_end = st.time_input("End Time", value=datetime.strptime("17:00", "%H:%M").time())
+
+            if st.form_submit_button("➕ Add Commitment"):
+                if s_title.strip():
+                    user_schedule.append({
+                        "id": str(uuid.uuid4()),
+                        "day": s_day,
+                        "title": s_title.strip(),
+                        "start": s_start.strftime("%H:%M"),
+                        "end": s_end.strftime("%H:%M")
+                    })
+                    _write_schedule_file(user_id, user_schedule)
+                    st.success("Commitment saved!")
+                    safe_rerun()
+
+        st.markdown("---")
+        st.markdown("#### Your Active Weekly Blocks")
+        if user_schedule:
+            for idx, item in enumerate(user_schedule):
+                col_item_a, col_item_b = st.columns([4, 1])
+                with col_item_a:
+                    st.markdown(f"**{item.get('day')}**: {item.get('title')} (`{item.get('start')} - {item.get('end')}`)")
+                with col_item_b:
+                    if st.button("🗑️", key=f"del_sched_{idx}"):
+                        user_schedule.pop(idx)
+                        _write_schedule_file(user_id, user_schedule)
+                        safe_rerun()
+        else:
+            st.info("No recurring events added yet.")
+
+    with col_sched_right:
+        st.markdown("### 🤖 AI Daily Action Plan")
+        st.caption("The AI scans your assignments, due dates, duration, and importance ratings to build your ideal schedule.")
+
+        if st.button("✨ Generate AI Schedule Plan", key="btn_gen_ai_plan"):
+            st.session_state["_ai_plan"] = generate_ai_study_plan(df_all, user_schedule)
+
+        ai_plan = st.session_state.get("_ai_plan") or generate_ai_study_plan(df_all, user_schedule)
+
+        if ai_plan:
+            for day_name, tasks in ai_plan.items():
+                st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">📅 {day_name}</div>', unsafe_allow_html=True)
+                
+                # Show scheduled commitments for this day
+                day_blocks = [s for s in user_schedule if s.get("day") == day_name]
+                if day_blocks:
+                    block_strs = [f"🚫 {b.get('title')} ({b.get('start')}-{b.get('end')})" for b in day_blocks]
+                    st.caption("Busy: " + ", ".join(block_strs))
+
+                if tasks:
+                    for t in tasks:
+                        st.markdown(
+                            f"▫️ **{t['title']}** (`{t['course']}`) — Importance: **{t['importance']}/10** | Due: **{t['due_date']}** | Est: `{t['eta_mins']} mins`"
+                        )
+                else:
+                    st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks assigned for this day. Free time!</span>", unsafe_allow_html=True)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.success("🎉 All tasks completed! No study sessions needed.")
