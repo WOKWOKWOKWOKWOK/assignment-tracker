@@ -1,11 +1,10 @@
 """
 Assignment Tracker — AI Weekly Schedule & 1-10 Importance Rating System
 
-Features:
-- AI Smart Planner that balances your weekly schedule & due dates
-- 1-10 Importance rating sliders replacing Low/Medium/High
-- Dedicated tabs for Assignments, Tests & Quizzes, and Weekly AI Schedule
-- Clean UI without search/sort clutter
+Fixes:
+- Converted all schedule time displays and inputs to 12-hour AM/PM format
+- Fixed AI Planner trigger to instantly generate and render daily study plans
+- Added explicit feedback when no open assignments exist vs when tasks are planned
 - 100% Supabase Cloud persistence
 """
 
@@ -647,24 +646,28 @@ def days_left(d: Optional[date]) -> Tuple[str, int]:
 # -----------------------
 # AI Planner Engine Algorithm
 # -----------------------
-def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    AI Logic: Analyzes open assignments, their 1-10 importance rating, due dates,
-    and user's free blocks to construct an optimal study agenda for the next 7 days.
+    AI Logic: Analyzes open assignments, 1-10 importance rating, due dates,
+    and user commitments to construct a daily action plan.
     """
+    if df_tasks.empty:
+        return {"status": "no_tasks", "plan": {}}
+
     incomplete = df_tasks[df_tasks["status"] != "Done"].copy()
     if incomplete.empty:
-        return {}
+        return {"status": "all_done", "plan": {}}
 
     today = date.today()
     task_queue = []
 
     for _, row in incomplete.iterrows():
         due_d = parse_date_iso_or_empty(row.get("due_date")) or (today + timedelta(days=7))
-        days_until = max(1, (due_d - today).days)
-        importance = _clean_priority(row.get("priority"))
+        days_until = (due_d - today).days
+        if days_until < 1:
+            days_until = 1
 
-        # AI Scoring Algorithm: Urgency (due date weight) * Importance (1-10 slider)
+        importance = _clean_priority(row.get("priority"))
         urgency_multiplier = 10.0 / days_until
         ai_score = importance * urgency_multiplier
 
@@ -685,9 +688,9 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
 
         task_queue.append({
             "id": row.get("id"),
-            "title": row.get("title"),
-            "course": row.get("course"),
-            "atype": row.get("atype"),
+            "title": row.get("title") or "Untitled",
+            "course": row.get("course") or "GENERAL",
+            "atype": row.get("atype") or "Homework",
             "due_date": due_d.strftime("%a %b %d"),
             "importance": importance,
             "score": ai_score,
@@ -695,19 +698,16 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             "days_until": days_until
         })
 
-    # Sort queue by AI priority score descending
     task_queue.sort(key=lambda x: x["score"], reverse=True)
 
-    # Distribute tasks into a 7-day timeline
     plan = {DAYS_OF_WEEK[(today.weekday() + i) % 7]: [] for i in range(7)}
 
     for t in task_queue:
-        # Schedule task on the optimal day prior to due date
-        best_day_offset = min(t["days_until"] - 1, 6)
+        best_day_offset = min(max(0, t["days_until"] - 1), 6)
         assigned_day = DAYS_OF_WEEK[(today.weekday() + best_day_offset) % 7]
         plan[assigned_day].append(t)
 
-    return plan
+    return {"status": "success", "plan": plan}
 
 
 # -----------------------
@@ -771,17 +771,6 @@ st.markdown(
         padding: 16px !important;
         margin-bottom: 16px !important;
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-    }
-
-    /* Importance Badge Pill */
-    .importance-badge {
-        background-color: #311b92;
-        color: #d1c4e9;
-        border: 1px solid #512da8;
-        border-radius: 6px;
-        padding: 2px 8px;
-        font-weight: 700;
-        font-size: 0.78rem;
     }
 
     /* Custom Terminal Yellow Submit Button */
@@ -1374,25 +1363,27 @@ with tab_schedule:
 
     with col_sched_left:
         st.markdown("### 🕒 Add Weekly Commitments")
-        st.caption("Enter recurring events (e.g., Classes, Sports, Work) so the AI knows when you are busy.")
+        st.caption("Enter recurring events in 12-hour AM/PM time so the AI knows when you are busy.")
 
         with st.form("add_schedule_event_form"):
             s_day = st.selectbox("Day of Week", DAYS_OF_WEEK)
             s_title = st.text_input("Event Name", placeholder="e.g. Soccer Practice, Math Class")
             c_time1, c_time2 = st.columns(2)
             with c_time1:
-                s_start = st.time_input("Start Time", value=datetime.strptime("15:30", "%H:%M").time())
+                s_start = st.time_input("Start Time", value=datetime.strptime("03:30 PM", "%I:%M %p").time())
             with c_time2:
-                s_end = st.time_input("End Time", value=datetime.strptime("17:00", "%H:%M").time())
+                s_end = st.time_input("End Time", value=datetime.strptime("05:00 PM", "%I:%M %p").time())
 
             if st.form_submit_button("➕ Add Commitment"):
                 if s_title.strip():
+                    formatted_start = s_start.strftime("%I:%M %p").lstrip("0")
+                    formatted_end = s_end.strftime("%I:%M %p").lstrip("0")
                     user_schedule.append({
                         "id": str(uuid.uuid4()),
                         "day": s_day,
                         "title": s_title.strip(),
-                        "start": s_start.strftime("%H:%M"),
-                        "end": s_end.strftime("%H:%M")
+                        "start": formatted_start,
+                        "end": formatted_end
                     })
                     _write_schedule_file(user_id, user_schedule)
                     st.success("Commitment saved!")
@@ -1415,21 +1406,29 @@ with tab_schedule:
 
     with col_sched_right:
         st.markdown("### 🤖 AI Daily Action Plan")
-        st.caption("The AI scans your assignments, due dates, duration, and importance ratings to build your ideal schedule.")
+        st.caption("Calculates your open assignments against your schedule, due dates, and 1-10 importance rating.")
+
+        fresh_assignments = fetch_assignments(user_id)
 
         if st.button("✨ Generate AI Schedule Plan", key="btn_gen_ai_plan"):
-            st.session_state["_ai_plan"] = generate_ai_study_plan(df_all, user_schedule)
+            st.session_state["_ai_plan_result"] = generate_ai_study_plan(fresh_assignments, user_schedule)
 
-        ai_plan = st.session_state.get("_ai_plan") or generate_ai_study_plan(df_all, user_schedule)
+        plan_res = st.session_state.get("_ai_plan_result") or generate_ai_study_plan(fresh_assignments, user_schedule)
 
-        if ai_plan:
-            for day_name, tasks in ai_plan.items():
+        status = plan_res.get("status")
+        plan = plan_res.get("plan", {})
+
+        if status == "no_tasks":
+            st.info("ℹ️ You have no assignments created yet. Add assignments in the 'Assignments' or 'Tests & Quizzes' tab first!")
+        elif status == "all_done":
+            st.success("🎉 All assignments are marked as 'Done'! Nothing to schedule.")
+        elif status == "success" and plan:
+            for day_name, tasks in plan.items():
                 st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">📅 {day_name}</div>', unsafe_allow_html=True)
                 
-                # Show scheduled commitments for this day
                 day_blocks = [s for s in user_schedule if s.get("day") == day_name]
                 if day_blocks:
-                    block_strs = [f"🚫 {b.get('title')} ({b.get('start')}-{b.get('end')})" for b in day_blocks]
+                    block_strs = [f"🚫 {b.get('title')} ({b.get('start')} - {b.get('end')})" for b in day_blocks]
                     st.caption("Busy: " + ", ".join(block_strs))
 
                 if tasks:
@@ -1441,5 +1440,3 @@ with tab_schedule:
                     st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks assigned for this day. Free time!</span>", unsafe_allow_html=True)
                 
                 st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            st.success("🎉 All tasks completed! No study sessions needed.")
