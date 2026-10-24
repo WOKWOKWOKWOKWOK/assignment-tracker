@@ -1,7 +1,7 @@
 """
 Assignment Tracker — Fully Migrated to Neon PostgreSQL
 Features:
-- Neon PostgreSQL storage via SQLAlchemy
+- Neon PostgreSQL storage via SQLAlchemy + psycopg2-binary
 - 1-10 Importance Rating system & AI Study Planner
 - 12-Hour AM/PM Weekly Schedule Manager
 - User authentication & automatic table initialization
@@ -14,7 +14,6 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, date, timedelta
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -250,12 +249,19 @@ DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturda
 # Database Engine Initialization
 # -----------------------
 def get_connection_url() -> str:
-    """Fetches connection string from secrets (supports postgres or connections.neon)."""
+    """Fetches connection string from secrets and formats driver for SQLAlchemy."""
+    url = ""
     if "postgres" in st.secrets and "url" in st.secrets["postgres"]:
-        return st.secrets["postgres"]["url"]
+        url = st.secrets["postgres"]["url"]
     elif "connections" in st.secrets and "neon" in st.secrets["connections"]:
-        return st.secrets["connections"]["neon"]["url"]
-    raise ValueError("Missing PostgreSQL database URL in .streamlit/secrets.toml")
+        url = st.secrets["connections"]["neon"]["url"]
+    else:
+        raise ValueError("Missing PostgreSQL database URL in .streamlit/secrets.toml")
+
+    # Force SQLAlchemy to use the installed psycopg2-binary driver
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return url
 
 
 @st.cache_resource
@@ -1211,7 +1217,7 @@ with tab_schedule:
         elif status == "success" and plan:
             for day_name, tasks in plan.items():
                 st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">📅 {day_name}</div>', unsafe_allow_html=True)
-                
+
                 day_blocks = [s for s in user_schedule if s.get("day") == day_name]
                 if day_blocks:
                     block_strs = [f"🚫 {b.get('title')} ({b.get('start')} - {b.get('end')})" for b in day_blocks]
@@ -1224,5 +1230,5 @@ with tab_schedule:
                         )
                 else:
                     st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks assigned for this day. Free time!</span>", unsafe_allow_html=True)
-                
+
                 st.markdown('</div>', unsafe_allow_html=True)
