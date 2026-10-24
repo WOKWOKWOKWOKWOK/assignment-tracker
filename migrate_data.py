@@ -24,6 +24,19 @@ with st.form("migration_form"):
     
     submitted = st.form_submit_button("🚀 Start Data Migration")
 
+
+def clean_priority_value(val):
+    if pd.isna(val) or val is None:
+        return 0
+    if isinstance(val, (int, float)):
+        return int(val)
+    val_str = str(val).strip()
+    if val_str.isdigit():
+        return int(val_str)
+    mapping = {"High": 9, "Medium": 5, "Low": 2}
+    return mapping.get(val_str, 5)
+
+
 if submitted:
     if not sb_url or not sb_key or not neon_url or not email:
         st.error("Please fill in all database fields.")
@@ -52,6 +65,10 @@ if submitted:
 
                 # Remap user_id
                 df["user_id"] = new_user_id
+
+                # Clean priority column so it matches Neon INTEGER type
+                if "priority" in df.columns:
+                    df["priority"] = df["priority"].apply(clean_priority_value)
 
                 # 4. Write to Neon
                 st.write("Writing data into Neon PostgreSQL...")
