@@ -1,10 +1,10 @@
 """
-Assignment Tracker — Fully Migrated to Neon PostgreSQL
+Assignment Tracker — Fully Migrated to Neon PostgreSQL with AI Time-Slot Scheduler
 Features:
 - Neon PostgreSQL storage via SQLAlchemy + psycopg2-binary
-- 1-10 Importance Rating system & AI Study Planner
+- Real AI Study Planner that schedules concrete hourly study blocks around busy recurring events
 - 12-Hour AM/PM Weekly Schedule Manager
-- User authentication & automatic table initialization
+- User authentication & automatic schema initialization
 - Tabbed view: Assignments, Tests & Quizzes, Schedule & AI Planner
 """
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -209,6 +209,16 @@ st.markdown(
         border-bottom: 1px solid #1e293b;
         padding-bottom: 4px;
     }
+
+    .time-slot-badge {
+        background-color: #1e1b4b;
+        color: #38bdf8;
+        border: 1px solid #0284c7;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 700;
+        font-size: 0.82rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -258,7 +268,7 @@ def get_connection_url() -> str:
     else:
         raise ValueError("Missing PostgreSQL database URL in .streamlit/secrets.toml")
 
-    # Force SQLAlchemy to use the installed psycopg2-binary driver
+    # Force SQLAlchemy to use psycopg2-binary
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
     return url
@@ -313,6 +323,8 @@ except Exception as e:
 # Utility Helpers
 # -----------------------
 def _clean_priority(val: Any) -> int:
+    if pd.isna(val) or val is None:
+        return 5
     if isinstance(val, (int, float)):
         return max(1, min(10, int(val)))
     val_str = str(val).strip()
@@ -335,7 +347,7 @@ def _pack_notes(notes_text: str, prev_status: str) -> str:
 
 
 def _unpack_notes(raw_notes: Any) -> Tuple[str, str]:
-    if not raw_notes:
+    if not raw_notes or pd.isna(raw_notes):
         return ("", "Not Started")
     try:
         data = json.loads(str(raw_notes))
@@ -602,10 +614,10 @@ def on_priority_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
 
 
 # -----------------------
-# Date Helpers
+# Date & Time Parsing Helpers
 # -----------------------
 def parse_date_iso_or_empty(s: Any) -> Optional[date]:
-    if s is None:
+    if s is None or pd.isna(s):
         return None
     if isinstance(s, date):
         return s
@@ -620,6 +632,19 @@ def parse_date_iso_or_empty(s: Any) -> Optional[date]:
                 return datetime.strptime(s, fmt).date()
             except Exception:
                 pass
+    return None
+
+
+def parse_time_str(t_str: str) -> Optional[time]:
+    """Parses various string time formats into standard datetime.time."""
+    if not t_str or pd.isna(t_str):
+        return None
+    t_str = str(t_str).strip().upper()
+    for fmt in ("%I:%M %p", "%H:%M", "%I:%M%p", "%H:%M:%S"):
+        try:
+            return datetime.strptime(t_str, fmt).time()
+        except ValueError:
+            pass
     return None
 
 
@@ -642,7 +667,7 @@ def days_left(d: Optional[date]) -> Tuple[str, int]:
 
 
 # -----------------------
-# AI Planner Algorithm
+# AI Time-Slot Scheduler Engine
 # -----------------------
 def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]]) -> Dict[str, Any]:
     if df_tasks.empty:
@@ -666,7 +691,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         ai_score = importance * urgency_multiplier
 
         eta_str = str(row.get("eta") or "30 mins").lower()
-        eta_mins = 45
+        eta_mins = 30
         if "hr" in eta_str or "hour" in eta_str:
             try:
                 nums = ''.join(c for c in eta_str.split("h")[0] if c.isdigit() or c == '.')
@@ -688,18 +713,88 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             "due_date": due_d.strftime("%a %b %d"),
             "importance": importance,
             "score": ai_score,
-            "eta_mins": eta_mins,
+            "eta_mins": max(15, eta_mins),
             "days_until": days_until
         })
 
+    # Sort tasks by highest AI score (Urgency + Importance)
     task_queue.sort(key=lambda x: x["score"], reverse=True)
 
-    plan = {DAYS_OF_WEEK[(today.weekday() + i) % 7]: [] for i in range(7)}
+    plan = {DAYS_OF_WEEK[(today.weekday() + i) % 7]: {"busy": [], "slots": []} for i in range(7)}
 
-    for t in task_queue:
-        best_day_offset = min(max(0, t["days_until"] - 1), 6)
-        assigned_day = DAYS_OF_WEEK[(today.weekday() + best_day_offset) % 7]
-        plan[assigned_day].append(t)
+    for i in range(7):
+        day_date = today + timedelta(days=i)
+        day_name = DAYS_OF_WEEK[day_date.weekday()]
+
+        # Define default study window per day
+        if day_date.weekday() in (5, 6):  # Weekend: 10:00 AM to 8:00 PM
+            DAY_START_MINS = 10 * 60
+            DAY_END_MINS = 20 * 60
+        else:  # Weekday: 3:30 PM to 9:00 PM
+            DAY_START_MINS = 15 * 60 + 30
+            DAY_END_MINS = 21 * 60
+
+        # 1. Parse busy blocks for this day
+        busy_intervals = []
+        day_events = [s for s in schedule if s.get("day") == day_name]
+
+        for ev in day_events:
+            st_time = parse_time_str(ev.get("start"))
+            end_time = parse_time_str(ev.get("end"))
+            if st_time and end_time:
+                st_m = st_time.hour * 60 + st_time.minute
+                end_m = end_time.hour * 60 + end_time.minute
+                busy_intervals.append((st_m, end_m))
+                plan[day_name]["busy"].append(f"{ev.get('title')} ({ev.get('start')} - {ev.get('end')})")
+
+        busy_intervals.sort(key=lambda x: x[0])
+
+        # 2. Derive open free study slots
+        free_slots = []
+        curr = DAY_START_MINS
+        for b_start, b_end in busy_intervals:
+            if b_start > curr:
+                slot_end = min(b_start, DAY_END_MINS)
+                if slot_end > curr:
+                    free_slots.append([curr, slot_end])
+            curr = max(curr, b_end)
+        if curr < DAY_END_MINS:
+            free_slots.append([curr, DAY_END_MINS])
+
+        # 3. Schedule high-priority tasks into free time windows
+        remaining_tasks = []
+        for t in task_queue:
+            if t["days_until"] >= i:
+                scheduled = False
+                needed = t["eta_mins"]
+
+                for slot in free_slots:
+                    slot_len = slot[1] - slot[0]
+                    if slot_len >= needed:
+                        st_m = slot[0]
+                        end_m = st_m + needed
+
+                        start_str = time(st_m // 60, st_m % 60).strftime("%I:%M %p").lstrip("0")
+                        end_str = time(end_m // 60, end_m % 60).strftime("%I:%M %p").lstrip("0")
+
+                        plan[day_name]["slots"].append({
+                            "time": f"{start_str} - {end_str}",
+                            "title": t["title"],
+                            "course": t["course"],
+                            "importance": t["importance"],
+                            "eta_mins": t["eta_mins"]
+                        })
+
+                        slot[0] = end_m  # Slide window forward
+                        scheduled = True
+                        break
+
+                if not scheduled:
+                    remaining_tasks.append(t)
+            else:
+                remaining_tasks.append(t)
+
+        task_queue = remaining_tasks
 
     return {"status": "success", "plan": plan}
 
@@ -1147,7 +1242,7 @@ with tab_tests:
     df_tests = df_all[df_all["atype"] == "Test & Quizzes"]
     render_assignment_grid(df_tests, key_prefix="tests_")
 
-# TAB 3: Weekly Schedule & AI Auto-Planner
+# TAB 3: Weekly Schedule & AI Time-Slot Planner
 with tab_schedule:
     col_sched_left, col_sched_right = st.columns([1.2, 1.8])
 
@@ -1198,7 +1293,7 @@ with tab_schedule:
 
     with col_sched_right:
         st.markdown("### 🤖 AI Daily Action Plan")
-        st.caption("Calculates your open assignments against your schedule, due dates, and 1-10 importance rating.")
+        st.caption("Schedules specific study time slots around your commitments, due dates, and importance rating.")
 
         fresh_assignments = fetch_assignments(user_id)
 
@@ -1215,18 +1310,19 @@ with tab_schedule:
         elif status == "all_done":
             st.success("🎉 All assignments are marked as 'Done'! Nothing to schedule.")
         elif status == "success" and plan:
-            for day_name, tasks in plan.items():
+            for day_name, day_data in plan.items():
                 st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">📅 {day_name}</div>', unsafe_allow_html=True)
 
-                day_blocks = [s for s in user_schedule if s.get("day") == day_name]
-                if day_blocks:
-                    block_strs = [f"🚫 {b.get('title')} ({b.get('start')} - {b.get('end')})" for b in day_blocks]
-                    st.caption("Busy: " + ", ".join(block_strs))
+                busy_list = day_data.get("busy", [])
+                if busy_list:
+                    st.caption("Busy: " + ", ".join([f"🚫 {b}" for b in busy_list]))
 
-                if tasks:
-                    for t in tasks:
+                study_slots = day_data.get("slots", [])
+                if study_slots:
+                    for s in study_slots:
                         st.markdown(
-                            f"▫️ **{t['title']}** (`{t['course']}`) — Importance: **{t['importance']}/10** | Due: **{t['due_date']}** | Est: `{t['eta_mins']} mins`"
+                            f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Importance: **{s['importance']}/10** ({s['eta_mins']} mins)",
+                            unsafe_allow_html=True
                         )
                 else:
                     st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks assigned for this day. Free time!</span>", unsafe_allow_html=True)
