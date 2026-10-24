@@ -4,6 +4,7 @@ Features:
 - Neon PostgreSQL storage via SQLAlchemy + psycopg2-binary
 - Multi-tenant user isolation for assignments, courses, and weekly commitments
 - Low / Medium / High simplified priority system
+- Smart duration parser handling ranges (e.g., '10-20 mins/day' -> 15 mins)
 - Balanced AI Study Planner: Spreads tasks across days to prevent overload
 - Toggleable exact time-slot display vs. simple bullet view
 - 12-Hour AM/PM Weekly Schedule Manager
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime, date, timedelta, time
 from typing import Any, Dict, List, Optional, Tuple
@@ -262,7 +264,6 @@ DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturda
 # Database Engine Initialization
 # -----------------------
 def get_connection_url() -> str:
-    """Fetches connection string from secrets and formats driver for SQLAlchemy."""
     url = ""
     if "postgres" in st.secrets and "url" in st.secrets["postgres"]:
         url = st.secrets["postgres"]["url"]
@@ -286,7 +287,6 @@ engine = get_db_engine()
 
 
 def init_db():
-    """Creates tables in Neon database automatically on first startup."""
     sql_users = text("""
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
@@ -322,10 +322,9 @@ except Exception as e:
 
 
 # -----------------------
-# Priority Mapping Helpers
+# Helper Utilities
 # -----------------------
 def priority_to_label(val: Any) -> str:
-    """Converts integers or strings to Low / Medium / High labels."""
     if pd.isna(val) or val is None:
         return "Medium"
     if isinstance(val, (int, float)):
@@ -345,9 +344,28 @@ def priority_to_label(val: Any) -> str:
 
 
 def priority_to_int(label: str) -> int:
-    """Maps Low/Medium/High labels to internal numeric weights for AI scheduling."""
     mapping = {"Low": 2, "Medium": 5, "High": 9}
     return mapping.get(label, 5)
+
+
+def parse_eta_to_mins(eta_raw: Any) -> int:
+    """Parses duration strings like '10-20 mins/day', '1 hour', or '45 mins' into clean minute integers."""
+    if not eta_raw or pd.isna(eta_raw):
+        return 30
+    s = str(eta_raw).lower().strip()
+    if not s:
+        return 30
+
+    nums = [int(n) for n in re.findall(r"\d+", s)]
+    if not nums:
+        return 30
+
+    is_hours = "hr" in s or "hour" in s
+    avg_val = sum(nums) // len(nums)
+
+    if is_hours:
+        return max(15, avg_val * 60)
+    return max(10, avg_val)
 
 
 def get_courses_config_id(user_id: str) -> str:
@@ -430,7 +448,7 @@ def sign_out_user() -> None:
 
 
 # -----------------------
-# Database CRUD Operations (Isolated Per User)
+# Database CRUD Operations
 # -----------------------
 def invalidate_cache():
     if "df_cached" in st.session_state:
@@ -590,7 +608,7 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Real-Time Event Callbacks
+# Real-Time Callbacks
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any], widget_key: str):
     chk_val = st.session_state.get(widget_key, False)
@@ -630,7 +648,7 @@ def on_priority_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
 
 
 # -----------------------
-# Date & Time Parsing Helpers
+# Date & Time Helpers
 # -----------------------
 def parse_date_iso_or_empty(s: Any) -> Optional[date]:
     if s is None or pd.isna(s):
@@ -706,20 +724,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         urgency_multiplier = 10.0 / days_until
         ai_score = importance_num * urgency_multiplier
 
-        eta_str = str(row.get("eta") or "30 mins").lower()
-        eta_mins = 30
-        if "hr" in eta_str or "hour" in eta_str:
-            try:
-                nums = ''.join(c for c in eta_str.split("h")[0] if c.isdigit() or c == '.')
-                eta_mins = int(float(nums) * 60)
-            except Exception:
-                eta_mins = 60
-        elif "min" in eta_str:
-            try:
-                nums = ''.join(c for c in eta_str if c.isdigit())
-                eta_mins = int(nums)
-            except Exception:
-                eta_mins = 30
+        eta_mins = parse_eta_to_mins(row.get("eta"))
 
         task_queue.append({
             "id": row.get("id"),
@@ -729,7 +734,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             "due_date": due_d.strftime("%a %b %d"),
             "priority": prio_label,
             "score": ai_score,
-            "eta_mins": max(15, eta_mins),
+            "eta_mins": eta_mins,
             "days_until": days_until
         })
 
@@ -1010,7 +1015,7 @@ def show_add_assignment_dialog(user_id: str):
         due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
         importance_label = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_prio_select")
         atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
-        eta = st.text_input("Estimated Duration (e.g., 45 mins, 2 hours)", key="add_eta")
+        eta = st.text_input("Estimated Duration (e.g., 15 mins, 1 hour)", key="add_eta")
         notes = st.text_area("Notes", value="", key="add_notes")
         submitted_add = st.form_submit_button("Add Assignment")
 
@@ -1308,7 +1313,6 @@ with tab_schedule:
         st.markdown("### 🤖 AI Daily Action Plan")
         st.caption("Schedules study tasks across available days based on due dates, priority, and busy blocks.")
 
-        # Controls & Display Toggles
         ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1.5, 1.2, 1.3])
 
         with ctrl_col1:
