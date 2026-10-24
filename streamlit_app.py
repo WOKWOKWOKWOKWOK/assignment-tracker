@@ -2,7 +2,8 @@
 Assignment Tracker — Fully Migrated to Neon PostgreSQL with AI Time-Slot Scheduler
 Features:
 - Neon PostgreSQL storage via SQLAlchemy + psycopg2-binary
-- Real AI Study Planner that schedules concrete hourly study blocks around busy recurring events
+- Strict multi-tenant user isolation for assignments, courses, and weekly commitments
+- Real AI Study Planner that schedules concrete hourly study blocks around individual busy events
 - 12-Hour AM/PM Weekly Schedule Manager
 - User authentication & automatic schema initialization
 - Tabbed view: Assignments, Tests & Quizzes, Schedule & AI Planner
@@ -266,7 +267,7 @@ def get_connection_url() -> str:
     elif "connections" in st.secrets and "neon" in st.secrets["connections"]:
         url = st.secrets["connections"]["neon"]["url"]
     else:
-        raise ValueError("Missing PostgreSQL database URL in .streamlit/secrets.toml")
+        raise ValueError("Missing PostgreSQL database URL in secrets configuration.")
 
     # Force SQLAlchemy to use psycopg2-binary
     if url.startswith("postgresql://"):
@@ -320,7 +321,7 @@ except Exception as e:
 
 
 # -----------------------
-# Utility Helpers
+# Utility Helpers & User Namespace IDs
 # -----------------------
 def _clean_priority(val: Any) -> int:
     if pd.isna(val) or val is None:
@@ -335,10 +336,12 @@ def _clean_priority(val: Any) -> int:
 
 
 def get_courses_config_id(user_id: str) -> str:
+    """Deterministic config ID strictly scoped to this user's ID."""
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_courses_config_{user_id}"))
 
 
 def get_schedule_config_id(user_id: str) -> str:
+    """Deterministic schedule ID strictly scoped to this user's ID."""
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_schedule_config_{user_id}"))
 
 
@@ -414,7 +417,7 @@ def sign_out_user() -> None:
 
 
 # -----------------------
-# Database CRUD Operations
+# Database CRUD Operations (Isolated Per User)
 # -----------------------
 def invalidate_cache():
     if "df_cached" in st.session_state:
@@ -423,9 +426,9 @@ def invalidate_cache():
 
 def _read_courses_file(user_id: str) -> List[str]:
     cfg_id = get_courses_config_id(user_id)
-    sql = text("SELECT notes FROM assignments WHERE id = :id")
+    sql = text("SELECT notes FROM assignments WHERE id = :id AND user_id = :uid")
     with engine.connect() as conn:
-        row = conn.execute(sql, {"id": cfg_id}).fetchone()
+        row = conn.execute(sql, {"id": cfg_id, "uid": user_id}).fetchone()
         if row and row.notes:
             try:
                 parsed = json.loads(row.notes)
@@ -443,7 +446,7 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
     sql = text("""
         INSERT INTO assignments (id, user_id, title, course, due_date, status, priority, atype, eta, notes, created_at)
         VALUES (:id, :user_id, '__SYSTEM_COURSES__', 'CONFIG', '', 'Not Started', 0, 'Other', '', :notes, :created_at)
-        ON CONFLICT (id) DO UPDATE SET notes = EXCLUDED.notes;
+        ON CONFLICT (id) DO UPDATE SET notes = EXCLUDED.notes, user_id = EXCLUDED.user_id;
     """)
     with engine.begin() as conn:
         conn.execute(sql, {
@@ -455,10 +458,11 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
 
 
 def _read_schedule_file(user_id: str) -> List[Dict[str, Any]]:
+    """Reads recurring schedule commitments strictly for this user."""
     cfg_id = get_schedule_config_id(user_id)
-    sql = text("SELECT notes FROM assignments WHERE id = :id")
+    sql = text("SELECT notes FROM assignments WHERE id = :id AND user_id = :uid")
     with engine.connect() as conn:
-        row = conn.execute(sql, {"id": cfg_id}).fetchone()
+        row = conn.execute(sql, {"id": cfg_id, "uid": user_id}).fetchone()
         if row and row.notes:
             try:
                 parsed = json.loads(row.notes)
@@ -470,13 +474,14 @@ def _read_schedule_file(user_id: str) -> List[Dict[str, Any]]:
 
 
 def _write_schedule_file(user_id: str, schedule: List[Dict[str, Any]]) -> None:
+    """Saves recurring schedule commitments strictly for this user."""
     if not user_id:
         return
     cfg_id = get_schedule_config_id(user_id)
     sql = text("""
         INSERT INTO assignments (id, user_id, title, course, due_date, status, priority, atype, eta, notes, created_at)
         VALUES (:id, :user_id, '__SYSTEM_SCHEDULE__', 'CONFIG', '', 'Not Started', 0, 'Other', '', :notes, :created_at)
-        ON CONFLICT (id) DO UPDATE SET notes = EXCLUDED.notes;
+        ON CONFLICT (id) DO UPDATE SET notes = EXCLUDED.notes, user_id = EXCLUDED.user_id;
     """)
     with engine.begin() as conn:
         conn.execute(sql, {
@@ -734,7 +739,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             DAY_START_MINS = 15 * 60 + 30
             DAY_END_MINS = 21 * 60
 
-        # 1. Parse busy blocks for this day
+        # 1. Parse busy blocks for this day from this user's schedule
         busy_intervals = []
         day_events = [s for s in schedule if s.get("day") == day_name]
 
@@ -1289,7 +1294,7 @@ with tab_schedule:
                         _write_schedule_file(user_id, user_schedule)
                         safe_rerun()
         else:
-            st.info("No recurring events added yet.")
+            st.info("No recurring events added yet. Add your practice or work blocks above!")
 
     with col_sched_right:
         st.markdown("### 🤖 AI Daily Action Plan")
@@ -1311,6 +1316,12 @@ with tab_schedule:
             st.success("🎉 All assignments are marked as 'Done'! Nothing to schedule.")
         elif status == "success" and plan:
             for day_name, day_data in plan.items():
+                # Defensive check: clear legacy plan format if day_data is a list instead of dict
+                if not isinstance(day_data, dict):
+                    st.session_state["_ai_plan_result"] = generate_ai_study_plan(fresh_assignments, user_schedule)
+                    safe_rerun()
+                    break
+
                 st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">📅 {day_name}</div>', unsafe_allow_html=True)
 
                 busy_list = day_data.get("busy", [])
