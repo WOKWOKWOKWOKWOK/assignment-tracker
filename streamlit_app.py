@@ -1010,7 +1010,7 @@ def show_add_assignment_dialog(user_id: str):
         due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
         importance_label = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_prio_select")
         atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
-        eta = st.text_input("Estimated Duration REQUIRED (e.g., 45 mins, 2 hours)", key="add_eta")
+        eta = st.text_input("Estimated Duration (e.g., 45 mins, 2 hours)", key="add_eta")
         notes = st.text_area("Notes", value="", key="add_notes")
         submitted_add = st.form_submit_button("Add Assignment")
 
@@ -1362,14 +1362,15 @@ with tab_schedule:
                 study_slots = day_data.get("slots", [])
                 if study_slots:
                     for s in study_slots:
+                        slot_prio = s.get("priority", priority_to_label(s.get("importance")))
                         if show_time_slots:
                             st.markdown(
-                                f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Priority: **{s['priority']}** ({s['eta_mins']} mins)",
+                                f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Priority: **{slot_prio}** ({s['eta_mins']} mins)",
                                 unsafe_allow_html=True
                             )
                         else:
                             st.markdown(
-                                f"▫️ **{s['title']}** (`{s['course']}`) — Priority: **{s['priority']}** ({s['eta_mins']} mins)"
+                                f"▫️ **{s['title']}** (`{s['course']}`) — Priority: **{slot_prio}** ({s['eta_mins']} mins)"
                             )
                 else:
                     st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks assigned for this day. Free time!</span>", unsafe_allow_html=True)
