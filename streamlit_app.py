@@ -1010,7 +1010,7 @@ def show_add_assignment_dialog(user_id: str):
         due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
         importance_label = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_prio_select")
         atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
-        eta = st.text_input("Estimated Duration (e.g., 45 mins, 2 hours)", key="add_eta")
+        eta = st.text_input("Estimated Duration REQUIRED (e.g., 45 mins, 2 hours)", key="add_eta")
         notes = st.text_area("Notes", value="", key="add_notes")
         submitted_add = st.form_submit_button("Add Assignment")
 
