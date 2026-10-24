@@ -5,9 +5,9 @@ Features:
 - Multi-tenant user isolation for assignments, courses, and weekly commitments
 - Low / Medium / High simplified priority system
 - Smart duration parser handling ranges (e.g., '10-20 mins/day' -> 15 mins)
+- Explicit 12-Hour AM/PM Commitment Time Inputs
 - Balanced AI Study Planner: Spreads tasks across days to prevent overload
 - Toggleable exact time-slot display vs. simple bullet view
-- 12-Hour AM/PM Weekly Schedule Manager
 - User authentication & automatic schema initialization
 """
 
@@ -673,7 +673,7 @@ def parse_time_str(t_str: str) -> Optional[time]:
     if not t_str or pd.isna(t_str):
         return None
     t_str = str(t_str).strip().upper()
-    for fmt in ("%I:%M %p", "%H:%M", "%I:%M%p", "%H:%M:%S"):
+    for fmt in ("%I:%M %p", "%I:%M%p", "%H:%M", "%H:%M:%S"):
         try:
             return datetime.strptime(t_str, fmt).time()
         except ValueError:
@@ -1275,14 +1275,16 @@ with tab_schedule:
             s_title = st.text_input("Event Name", placeholder="e.g. Soccer Practice, Math Class")
             c_time1, c_time2 = st.columns(2)
             with c_time1:
-                s_start = st.time_input("Start Time", value=datetime.strptime("03:30 PM", "%I:%M %p").time())
+                s_start_raw = st.text_input("Start Time", value="3:30 PM", help="Format: e.g., 2:10 PM or 3:30 PM", key="sched_start_input")
             with c_time2:
-                s_end = st.time_input("End Time", value=datetime.strptime("05:00 PM", "%I:%M %p").time())
+                s_end_raw = st.text_input("End Time", value="5:00 PM", help="Format: e.g., 3:15 PM or 5:00 PM", key="sched_end_input")
 
             if st.form_submit_button("➕ Add Commitment"):
-                if s_title.strip():
-                    formatted_start = s_start.strftime("%I:%M %p").lstrip("0")
-                    formatted_end = s_end.strftime("%I:%M %p").lstrip("0")
+                st_time = parse_time_str(s_start_raw)
+                end_time = parse_time_str(s_end_raw)
+                if s_title.strip() and st_time and end_time:
+                    formatted_start = st_time.strftime("%I:%M %p").lstrip("0")
+                    formatted_end = end_time.strftime("%I:%M %p").lstrip("0")
                     user_schedule.append({
                         "id": str(uuid.uuid4()),
                         "day": s_day,
@@ -1293,6 +1295,8 @@ with tab_schedule:
                     _write_schedule_file(user_id, user_schedule)
                     st.success("Commitment saved!")
                     safe_rerun()
+                else:
+                    st.error("Please enter a valid event name and 12-hour start/end times (e.g., 2:10 PM, 3:15 PM).")
 
         st.markdown("---")
         st.markdown("#### Your Active Weekly Blocks")
