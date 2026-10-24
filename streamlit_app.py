@@ -3,6 +3,7 @@ Assignment Tracker — Fully Migrated to Neon PostgreSQL with AI Time-Slot Sched
 Features:
 - Neon PostgreSQL storage via SQLAlchemy + psycopg2-binary
 - Multi-tenant user isolation for assignments, courses, and weekly commitments
+- Low / Medium / High simplified priority system
 - Balanced AI Study Planner: Spreads tasks across days to prevent overload
 - Toggleable exact time-slot display vs. simple bullet view
 - 12-Hour AM/PM Weekly Schedule Manager
@@ -253,6 +254,7 @@ else:
 DEFAULT_DOMAIN = "@simsburyschools.net"
 STATUS_OPTIONS = ["Not Started", "In Progress", "Done"]
 TYPE_OPTIONS = ["Homework", "Essay", "Presentation", "Test & Quizzes", "Other"]
+PRIORITY_OPTIONS = ["Low", "Medium", "High"]
 DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
@@ -320,18 +322,32 @@ except Exception as e:
 
 
 # -----------------------
-# Utility Helpers & User Namespace IDs
+# Priority Mapping Helpers
 # -----------------------
-def _clean_priority(val: Any) -> int:
+def priority_to_label(val: Any) -> str:
+    """Converts integers or strings to Low / Medium / High labels."""
     if pd.isna(val) or val is None:
-        return 5
+        return "Medium"
     if isinstance(val, (int, float)):
-        return max(1, min(10, int(val)))
-    val_str = str(val).strip()
+        val_int = int(val)
+        if val_int <= 3:
+            return "Low"
+        elif val_int <= 7:
+            return "Medium"
+        else:
+            return "High"
+    val_str = str(val).strip().title()
+    if val_str in PRIORITY_OPTIONS:
+        return val_str
     if val_str.isdigit():
-        return max(1, min(10, int(val_str)))
-    mapping = {"High": 9, "Medium": 5, "Low": 2}
-    return mapping.get(val_str, 5)
+        return priority_to_label(int(val_str))
+    return "Medium"
+
+
+def priority_to_int(label: str) -> int:
+    """Maps Low/Medium/High labels to internal numeric weights for AI scheduling."""
+    mapping = {"Low": 2, "Medium": 5, "High": 9}
+    return mapping.get(label, 5)
 
 
 def get_courses_config_id(user_id: str) -> str:
@@ -512,7 +528,7 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
             "course": str(r.get("course") or "GENERAL").strip().upper(),
             "due_date": str(r.get("due_date") or ""),
             "status": str(r.get("status") or "Not Started"),
-            "priority": _clean_priority(r.get("priority")),
+            "priority": priority_to_int(priority_to_label(r.get("priority"))),
             "atype": str(r.get("atype") or "Homework"),
             "eta": str(r.get("eta") or ""),
             "created_at": str(r.get("created_at") or ""),
@@ -556,7 +572,7 @@ def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
                 "course": str(row.get("course", "GENERAL")).strip().upper(),
                 "due_date": str(row.get("due_date") or ""),
                 "status": str(row.get("status", "Not Started")),
-                "priority": _clean_priority(row.get("priority")),
+                "priority": priority_to_int(priority_to_label(row.get("priority"))),
                 "atype": str(row.get("atype", "Homework")),
                 "eta": str(row.get("eta", "")).strip(),
                 "notes": packed,
@@ -607,9 +623,9 @@ def on_status_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
 
 
 def on_priority_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
-    new_prio = st.session_state.get(widget_key)
-    if new_prio is not None:
-        row_dict["priority"] = int(new_prio)
+    new_prio_label = st.session_state.get(widget_key)
+    if new_prio_label:
+        row_dict["priority"] = priority_to_int(new_prio_label)
         upsert_assignments([row_dict])
 
 
@@ -666,7 +682,7 @@ def days_left(d: Optional[date]) -> Tuple[str, int]:
 
 
 # -----------------------
-# Balanced AI Time-Slot Scheduler Engine (Work Spreading Enabled)
+# AI Time-Slot Scheduler Engine
 # -----------------------
 def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]], max_daily_mins: int = 60) -> Dict[str, Any]:
     if df_tasks.empty:
@@ -685,9 +701,10 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         if days_until < 1:
             days_until = 1
 
-        importance = _clean_priority(row.get("priority"))
+        prio_label = priority_to_label(row.get("priority"))
+        importance_num = priority_to_int(prio_label)
         urgency_multiplier = 10.0 / days_until
-        ai_score = importance * urgency_multiplier
+        ai_score = importance_num * urgency_multiplier
 
         eta_str = str(row.get("eta") or "30 mins").lower()
         eta_mins = 30
@@ -710,13 +727,12 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             "course": row.get("course") or "GENERAL",
             "atype": row.get("atype") or "Homework",
             "due_date": due_d.strftime("%a %b %d"),
-            "importance": importance,
+            "priority": prio_label,
             "score": ai_score,
             "eta_mins": max(15, eta_mins),
             "days_until": days_until
         })
 
-    # Sort tasks by highest AI urgency/importance score
     task_queue.sort(key=lambda x: x["score"], reverse=True)
 
     plan = {DAYS_OF_WEEK[(today.weekday() + i) % 7]: {"busy": [], "slots": []} for i in range(7)}
@@ -732,7 +748,6 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             DAY_START_MINS = 15 * 60 + 30
             DAY_END_MINS = 21 * 60
 
-        # Parse busy blocks for this day
         busy_intervals = []
         day_events = [s for s in schedule if s.get("day") == day_name]
 
@@ -747,7 +762,6 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
 
         busy_intervals.sort(key=lambda x: x[0])
 
-        # Derive open study slots
         free_slots = []
         curr = DAY_START_MINS
         for b_start, b_end in busy_intervals:
@@ -759,12 +773,10 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         if curr < DAY_END_MINS:
             free_slots.append([curr, DAY_END_MINS])
 
-        # Schedule tasks with a daily time limit cap to spread work out evenly
         day_scheduled_mins = 0
         remaining_tasks = []
 
         for t in task_queue:
-            # Only schedule task if due date is today or later, AND daily study load hasn't exceeded cap
             if t["days_until"] >= i and day_scheduled_mins < max_daily_mins:
                 scheduled = False
                 needed = t["eta_mins"]
@@ -782,7 +794,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
                             "time": f"{start_str} - {end_str}",
                             "title": t["title"],
                             "course": t["course"],
-                            "importance": t["importance"],
+                            "priority": t["priority"],
                             "eta_mins": t["eta_mins"]
                         })
 
@@ -891,7 +903,7 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                     days_text, _ = days_left(due_d)
 
                     status = st.session_state.get(f"{key_prefix}status_sel_{aid}") or row.get("status") or "Not Started"
-                    importance_val = _clean_priority(row.get("priority"))
+                    prio_label = priority_to_label(row.get("priority"))
                     row_dict = row.to_dict()
 
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
@@ -938,13 +950,12 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                             unsafe_allow_html=True,
                         )
                     with c_bot2:
-                        st.markdown(f"<div class='prio-label'>IMPORTANCE: {importance_val}/10</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='prio-label'>PRIORITY</div>", unsafe_allow_html=True)
                         prio_key = f"{key_prefix}prio_sel_{aid}"
-                        st.slider(
-                            "Importance",
-                            min_value=1,
-                            max_value=10,
-                            value=importance_val,
+                        st.selectbox(
+                            "Priority",
+                            PRIORITY_OPTIONS,
+                            index=PRIORITY_OPTIONS.index(prio_label),
                             key=prio_key,
                             label_visibility="collapsed",
                             on_change=on_priority_change,
@@ -997,7 +1008,7 @@ def show_add_assignment_dialog(user_id: str):
         course_free = st.text_input("Or type a new course name", value="", key="add_course_free")
         status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
         due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
-        importance = st.slider("Importance / Priority Level (1 = Low, 10 = Critical)", min_value=1, max_value=10, value=5, key="add_prio_slider")
+        importance_label = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_prio_select")
         atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
         eta = st.text_input("Estimated Duration (e.g., 45 mins, 2 hours)", key="add_eta")
         notes = st.text_area("Notes", value="", key="add_notes")
@@ -1012,7 +1023,7 @@ def show_add_assignment_dialog(user_id: str):
                 "course": course_val.strip(),
                 "due_date": due.isoformat() if isinstance(due, date) else None,
                 "status": status,
-                "priority": importance,
+                "priority": priority_to_int(importance_label),
                 "atype": atype,
                 "eta": eta.strip(),
                 "created_at": datetime.utcnow().isoformat(),
@@ -1059,12 +1070,12 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
         )
         due_parsed = parse_date_iso_or_empty(assignment_record.get("due_date")) or date.today()
         due = st.date_input("Due Date (MM/DD/YYYY)", value=due_parsed, key=f"edit_due_{aid}")
-        importance = st.slider(
-            "Importance Level (1-10)",
-            min_value=1,
-            max_value=10,
-            value=_clean_priority(assignment_record.get("priority")),
-            key=f"edit_prio_slider_{aid}"
+        curr_prio_label = priority_to_label(assignment_record.get("priority"))
+        importance_label = st.selectbox(
+            "Priority Level",
+            PRIORITY_OPTIONS,
+            index=PRIORITY_OPTIONS.index(curr_prio_label),
+            key=f"edit_prio_select_{aid}"
         )
         atype = st.selectbox(
             "Assignment Type",
@@ -1090,7 +1101,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
                 "course": course_val.strip(),
                 "due_date": due.isoformat() if isinstance(due, date) else None,
                 "status": status,
-                "priority": importance,
+                "priority": priority_to_int(importance_label),
                 "atype": atype,
                 "eta": eta.strip(),
                 "notes": notes.strip(),
@@ -1295,7 +1306,7 @@ with tab_schedule:
 
     with col_sched_right:
         st.markdown("### 🤖 AI Daily Action Plan")
-        st.caption("Schedules study tasks across available days based on due dates, importance, and busy blocks.")
+        st.caption("Schedules study tasks across available days based on due dates, priority, and busy blocks.")
 
         # Controls & Display Toggles
         ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1.5, 1.2, 1.3])
@@ -1353,12 +1364,12 @@ with tab_schedule:
                     for s in study_slots:
                         if show_time_slots:
                             st.markdown(
-                                f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Importance: **{s['importance']}/10** ({s['eta_mins']} mins)",
+                                f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Priority: **{s['priority']}** ({s['eta_mins']} mins)",
                                 unsafe_allow_html=True
                             )
                         else:
                             st.markdown(
-                                f"▫️ **{s['title']}** (`{s['course']}`) — Importance: **{s['importance']}/10** ({s['eta_mins']} mins)"
+                                f"▫️ **{s['title']}** (`{s['course']}`) — Priority: **{s['priority']}** ({s['eta_mins']} mins)"
                             )
                 else:
                     st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks assigned for this day. Free time!</span>", unsafe_allow_html=True)
