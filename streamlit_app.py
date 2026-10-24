@@ -2,11 +2,11 @@
 Assignment Tracker — Fully Migrated to Neon PostgreSQL with AI Time-Slot Scheduler
 Features:
 - Neon PostgreSQL storage via SQLAlchemy + psycopg2-binary
-- Strict multi-tenant user isolation for assignments, courses, and weekly commitments
-- Real AI Study Planner that schedules concrete hourly study blocks around individual busy events
+- Multi-tenant user isolation for assignments, courses, and weekly commitments
+- Balanced AI Study Planner: Spreads tasks across days to prevent overload
+- Toggleable exact time-slot display vs. simple bullet view
 - 12-Hour AM/PM Weekly Schedule Manager
 - User authentication & automatic schema initialization
-- Tabbed view: Assignments, Tests & Quizzes, Schedule & AI Planner
 """
 
 from __future__ import annotations
@@ -269,7 +269,6 @@ def get_connection_url() -> str:
     else:
         raise ValueError("Missing PostgreSQL database URL in secrets configuration.")
 
-    # Force SQLAlchemy to use psycopg2-binary
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
     return url
@@ -336,12 +335,10 @@ def _clean_priority(val: Any) -> int:
 
 
 def get_courses_config_id(user_id: str) -> str:
-    """Deterministic config ID strictly scoped to this user's ID."""
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_courses_config_{user_id}"))
 
 
 def get_schedule_config_id(user_id: str) -> str:
-    """Deterministic schedule ID strictly scoped to this user's ID."""
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_schedule_config_{user_id}"))
 
 
@@ -458,7 +455,6 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
 
 
 def _read_schedule_file(user_id: str) -> List[Dict[str, Any]]:
-    """Reads recurring schedule commitments strictly for this user."""
     cfg_id = get_schedule_config_id(user_id)
     sql = text("SELECT notes FROM assignments WHERE id = :id AND user_id = :uid")
     with engine.connect() as conn:
@@ -474,7 +470,6 @@ def _read_schedule_file(user_id: str) -> List[Dict[str, Any]]:
 
 
 def _write_schedule_file(user_id: str, schedule: List[Dict[str, Any]]) -> None:
-    """Saves recurring schedule commitments strictly for this user."""
     if not user_id:
         return
     cfg_id = get_schedule_config_id(user_id)
@@ -641,7 +636,6 @@ def parse_date_iso_or_empty(s: Any) -> Optional[date]:
 
 
 def parse_time_str(t_str: str) -> Optional[time]:
-    """Parses various string time formats into standard datetime.time."""
     if not t_str or pd.isna(t_str):
         return None
     t_str = str(t_str).strip().upper()
@@ -672,9 +666,9 @@ def days_left(d: Optional[date]) -> Tuple[str, int]:
 
 
 # -----------------------
-# AI Time-Slot Scheduler Engine
+# Balanced AI Time-Slot Scheduler Engine (Work Spreading Enabled)
 # -----------------------
-def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]]) -> Dict[str, Any]:
+def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]], max_daily_mins: int = 60) -> Dict[str, Any]:
     if df_tasks.empty:
         return {"status": "no_tasks", "plan": {}}
 
@@ -722,7 +716,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             "days_until": days_until
         })
 
-    # Sort tasks by highest AI score (Urgency + Importance)
+    # Sort tasks by highest AI urgency/importance score
     task_queue.sort(key=lambda x: x["score"], reverse=True)
 
     plan = {DAYS_OF_WEEK[(today.weekday() + i) % 7]: {"busy": [], "slots": []} for i in range(7)}
@@ -731,15 +725,14 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         day_date = today + timedelta(days=i)
         day_name = DAYS_OF_WEEK[day_date.weekday()]
 
-        # Define default study window per day
-        if day_date.weekday() in (5, 6):  # Weekend: 10:00 AM to 8:00 PM
+        if day_date.weekday() in (5, 6):  # Weekend
             DAY_START_MINS = 10 * 60
             DAY_END_MINS = 20 * 60
-        else:  # Weekday: 3:30 PM to 9:00 PM
+        else:  # Weekday
             DAY_START_MINS = 15 * 60 + 30
             DAY_END_MINS = 21 * 60
 
-        # 1. Parse busy blocks for this day from this user's schedule
+        # Parse busy blocks for this day
         busy_intervals = []
         day_events = [s for s in schedule if s.get("day") == day_name]
 
@@ -754,7 +747,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
 
         busy_intervals.sort(key=lambda x: x[0])
 
-        # 2. Derive open free study slots
+        # Derive open study slots
         free_slots = []
         curr = DAY_START_MINS
         for b_start, b_end in busy_intervals:
@@ -766,10 +759,13 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         if curr < DAY_END_MINS:
             free_slots.append([curr, DAY_END_MINS])
 
-        # 3. Schedule high-priority tasks into free time windows
+        # Schedule tasks with a daily time limit cap to spread work out evenly
+        day_scheduled_mins = 0
         remaining_tasks = []
+
         for t in task_queue:
-            if t["days_until"] >= i:
+            # Only schedule task if due date is today or later, AND daily study load hasn't exceeded cap
+            if t["days_until"] >= i and day_scheduled_mins < max_daily_mins:
                 scheduled = False
                 needed = t["eta_mins"]
 
@@ -790,7 +786,8 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
                             "eta_mins": t["eta_mins"]
                         })
 
-                        slot[0] = end_m  # Slide window forward
+                        slot[0] = end_m
+                        day_scheduled_mins += needed
                         scheduled = True
                         break
 
@@ -1298,14 +1295,36 @@ with tab_schedule:
 
     with col_sched_right:
         st.markdown("### 🤖 AI Daily Action Plan")
-        st.caption("Schedules specific study time slots around your commitments, due dates, and importance rating.")
+        st.caption("Schedules study tasks across available days based on due dates, importance, and busy blocks.")
+
+        # Controls & Display Toggles
+        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1.5, 1.2, 1.3])
+
+        with ctrl_col1:
+            gen_plan_click = st.button("✨ Generate AI Schedule Plan", key="btn_gen_ai_plan")
+
+        with ctrl_col2:
+            show_time_slots = st.toggle("Show Time Slots", value=True, key="toggle_show_time_slots")
+
+        with ctrl_col3:
+            max_daily_study = st.selectbox(
+                "Max Study / Day",
+                options=[45, 60, 90, 120, 180],
+                index=1,
+                format_func=lambda x: f"{x} mins max",
+                help="Spreads out work across multiple days so you aren't overwhelmed on a single day."
+            )
 
         fresh_assignments = fetch_assignments(user_id)
 
-        if st.button("✨ Generate AI Schedule Plan", key="btn_gen_ai_plan"):
-            st.session_state["_ai_plan_result"] = generate_ai_study_plan(fresh_assignments, user_schedule)
+        if gen_plan_click:
+            st.session_state["_ai_plan_result"] = generate_ai_study_plan(
+                fresh_assignments, user_schedule, max_daily_mins=max_daily_study
+            )
 
-        plan_res = st.session_state.get("_ai_plan_result") or generate_ai_study_plan(fresh_assignments, user_schedule)
+        plan_res = st.session_state.get("_ai_plan_result") or generate_ai_study_plan(
+            fresh_assignments, user_schedule, max_daily_mins=max_daily_study
+        )
 
         status = plan_res.get("status")
         plan = plan_res.get("plan", {})
@@ -1316,9 +1335,10 @@ with tab_schedule:
             st.success("🎉 All assignments are marked as 'Done'! Nothing to schedule.")
         elif status == "success" and plan:
             for day_name, day_data in plan.items():
-                # Defensive check: clear legacy plan format if day_data is a list instead of dict
                 if not isinstance(day_data, dict):
-                    st.session_state["_ai_plan_result"] = generate_ai_study_plan(fresh_assignments, user_schedule)
+                    st.session_state["_ai_plan_result"] = generate_ai_study_plan(
+                        fresh_assignments, user_schedule, max_daily_mins=max_daily_study
+                    )
                     safe_rerun()
                     break
 
@@ -1331,10 +1351,15 @@ with tab_schedule:
                 study_slots = day_data.get("slots", [])
                 if study_slots:
                     for s in study_slots:
-                        st.markdown(
-                            f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Importance: **{s['importance']}/10** ({s['eta_mins']} mins)",
-                            unsafe_allow_html=True
-                        )
+                        if show_time_slots:
+                            st.markdown(
+                                f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Importance: **{s['importance']}/10** ({s['eta_mins']} mins)",
+                                unsafe_allow_html=True
+                            )
+                        else:
+                            st.markdown(
+                                f"▫️ **{s['title']}** (`{s['course']}`) — Importance: **{s['importance']}/10** ({s['eta_mins']} mins)"
+                            )
                 else:
                     st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks assigned for this day. Free time!</span>", unsafe_allow_html=True)
 
