@@ -1,6 +1,7 @@
 """
 Assignment Tracker — Fully Migrated to Neon PostgreSQL with Real-Time AI Scheduler
 Features:
+- Fixed StreamlitDuplicateElementKey bug with deterministic slot indexing
 - Daily Task Completion Checkbox with 20-Second Transient Undo Timer
 - Real-Time Clock Integration (America/New_York local time lock)
 - Pre-Due-Date AI Scheduling: All tasks & test prep finish BEFORE due date
@@ -840,8 +841,9 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
                         start_str = time(st_m // 60, st_m % 60).strftime("%I:%M %p").lstrip("0")
                         end_str = time(end_m // 60, end_m % 60).strftime("%I:%M %p").lstrip("0")
 
+                        slot_idx = len(plan[day_name]["slots"])
                         plan[day_name]["slots"].append({
-                            "slot_id": f"{t['id']}_{day_date.isoformat()}",
+                            "slot_id": f"{t['id']}_{day_date.isoformat()}_{slot_idx}",
                             "task_id": t["id"],
                             "time": f"{start_str} - {end_str}",
                             "title": t["title"],
@@ -1437,17 +1439,16 @@ with tab_schedule:
                     st.caption("Busy: " + ", ".join([f"🚫 {b}" for b in busy_list]))
 
                 raw_slots = day_data.get("slots", [])
-                # Filter out slots marked as done for today
                 visible_slots = [s for s in raw_slots if s.get("slot_id") not in completed_set]
 
                 if visible_slots:
-                    for s in visible_slots:
+                    for idx_slot, s in enumerate(visible_slots):
                         s_id = s.get("slot_id")
                         slot_prio = s.get("priority", priority_to_label(s.get("importance")))
 
                         c_chk, c_text = st.columns([0.4, 7.6])
                         with c_chk:
-                            chk_key = f"chk_day_done_{s_id}"
+                            chk_key = f"chk_day_done_{s_id}_{idx_slot}"
                             if st.checkbox("Done Today", key=chk_key, label_visibility="collapsed"):
                                 st.session_state["_completed_daily_slots"].add(s_id)
                                 st.session_state["_undo_slot_state"] = {
