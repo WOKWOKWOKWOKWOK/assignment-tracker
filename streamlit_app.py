@@ -1,14 +1,11 @@
 """
-Assignment Tracker — Fully Migrated to Neon PostgreSQL with Real-Time AI Scheduler
+Assignment Tracker — Executive Edition
 Features:
-- Fixed Undo Persistence Bug: Explicit widget state clearing restores tasks instantly
-- Fixed StreamlitDuplicateElementKey bug with deterministic slot indexing
-- Daily Task Completion Checkbox with 20-Second Transient Undo Timer
-- Real-Time Clock Integration (America/New_York local time lock)
+- Animated JS/CSS Real-Time Countdown Undo Banner (Auto-dismisses on expiration)
+- Modern Linear/Vercel Dark UI Theme (Pro typography, subtle borders, micro-capsule badges)
+- Real-Time Clock Integration (America/New_York EDT lock)
 - Pre-Due-Date AI Scheduling: All tasks & test prep finish BEFORE due date
 - Smart duration parser handling ranges (e.g., '10-20 mins/day' -> 15 mins)
-- Recurring Daily AI Study Planning for Tests & Quizzes with clear "Study for..." labeling
-- Explicit 12-Hour AM/PM Commitment Time Inputs
 - Multi-tenant Neon PostgreSQL storage with isolated user accounts
 """
 
@@ -23,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from sqlalchemy import create_engine, text
 
 
@@ -36,11 +34,11 @@ def get_local_now() -> datetime:
 
 
 # -----------------------
-# Streamlit Page Config & CSS Overrides
+# Streamlit Page Config & Professional CSS Overrides
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
-    page_icon="📋",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -48,191 +46,168 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Dark Theme Canvas */
-    .stApp {
-        background-color: #080c14 !important;
-        color: #e2e8f0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+    /* Global Typography & Deep Charcoal Canvas */
+    html, body, .stApp {
+        background-color: #030712 !important;
+        color: #f3f4f6 !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
     }
 
     .main .block-container {
-        padding-top: 1.5rem !important;
+        padding-top: 1.25rem !important;
         padding-bottom: 3rem !important;
-        max-width: 1440px;
+        max-width: 1400px;
     }
 
-    /* Hide Streamlit Header, Footer, and Navigation Sidebars */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    div[data-testid="stToolbar"] {display: none !important;}
-    div[data-testid="stDecoration"] {display: none !important;}
-    div[data-testid="stStatusWidget"] {visibility: hidden !important;}
-    section[data-testid="stSidebar"],
-    div[data-testid="collapsedControl"],
-    button[data-testid="stSidebarCollapseButton"] {
-        display: none !important;
-    }
+    /* Hide Streamlit Header, Footer, and Chrome */
+    #MainMenu, header, footer {visibility: hidden;}
+    div[data-testid="stToolbar"], div[data-testid="stDecoration"], div[data-testid="stStatusWidget"] {display: none !important;}
+    section[data-testid="stSidebar"], div[data-testid="collapsedControl"], button[data-testid="stSidebarCollapseButton"] {display: none !important;}
 
-    /* Tab Navigation Styling */
+    /* Tab Navigation — Minimal Underline Tabs */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 12px;
         background-color: transparent;
-        border-bottom: 1px solid #1e293b;
-        margin-bottom: 22px;
+        border-bottom: 1px solid #1f2937;
+        margin-bottom: 24px;
     }
 
     .stTabs [data-baseweb="tab"] {
-        height: 42px;
-        white-space: pre;
-        border-radius: 8px 8px 0 0;
-        color: #94a3b8;
-        font-weight: 600;
-        font-size: 0.9rem;
-        padding: 8px 20px;
-        background-color: #0f172a;
-        border: 1px solid #1e293b;
-        border-bottom: none;
+        height: 38px;
+        border-radius: 6px;
+        color: #9ca3af;
+        font-weight: 500;
+        font-size: 0.85rem;
+        padding: 6px 16px;
+        background-color: transparent;
+        border: none;
     }
 
     .stTabs [aria-selected="true"] {
-        background-color: #1e1b4b !important;
-        color: #a5b4fc !important;
-        border-color: #4f46e5 !important;
+        background-color: #111827 !important;
+        color: #f9fafb !important;
+        border: 1px solid #374151 !important;
     }
 
-    /* Card Box Container */
+    /* Professional Card Containers */
     div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #0c1322 !important;
-        border: 1px solid #1e293b !important;
-        border-radius: 12px !important;
+        background-color: #0b0f19 !important;
+        border: 1px solid #1f293d !important;
+        border-radius: 10px !important;
         padding: 16px !important;
-        margin-bottom: 16px !important;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        margin-bottom: 14px !important;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
     }
 
-    /* Custom Submit Button */
-    button[key="auth_submit_btn"] {
-        background-color: #1e293b !important;
-        color: #fbbf24 !important;
-        border: 1px solid #334155 !important;
-        border-radius: 8px !important;
-        font-weight: 700 !important;
-    }
-
-    /* Title & Banner Styling */
+    /* Headers & Text Elements */
     .app-title {
-        font-size: 2.1rem;
-        font-weight: 900;
-        color: #ffffff;
+        font-size: 1.6rem;
+        font-weight: 800;
+        color: #f9fafb;
+        letter-spacing: -0.03em;
         margin: 0;
-        letter-spacing: -0.02em;
     }
 
     .app-subtitle {
-        font-size: 0.88rem;
-        color: #64748b;
-        margin-top: 4px;
+        font-size: 0.82rem;
+        color: #6b7280;
+        margin-top: 2px;
     }
 
-    .calendar-banner-box {
-        background-color: #0f172a;
-        border: 1px solid #1e293b;
-        border-radius: 10px;
-        padding: 10px 16px;
-        text-align: center;
-        color: #818cf8;
+    .date-banner {
+        background-color: #0b0f19;
+        border: 1px solid #1f293d;
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 0.82rem;
         font-weight: 600;
-        font-size: 0.95rem;
-        margin: 12px 0 20px 0;
+        color: #9ca3af;
+        text-align: right;
     }
 
-    .course-badge {
-        background-color: #1e1b4b;
-        color: #818cf8;
-        border: 1px solid #312e81;
-        border-radius: 6px;
-        padding: 4px 10px;
+    /* Micro Badges & Chips */
+    .course-chip {
+        background-color: #172554;
+        color: #60a5fa;
+        border: 1px solid #1e40af;
+        border-radius: 4px;
+        padding: 2px 8px;
+        font-size: 0.72rem;
         font-weight: 700;
-        font-size: 0.75rem;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.03em;
         display: inline-block;
     }
 
-    .card-title {
-        font-size: 1.35rem;
-        font-weight: 800;
-        color: #ffffff;
-        margin-top: 10px;
-        margin-bottom: 2px;
-    }
+    .prio-high { color: #f87171; font-weight: 600; font-size: 0.75rem; }
+    .prio-medium { color: #fbbf24; font-weight: 600; font-size: 0.75rem; }
+    .prio-low { color: #34d399; font-weight: 600; font-size: 0.75rem; }
 
-    .card-type {
-        color: #f43f5e;
-        font-size: 0.82rem;
-        font-weight: 600;
-        margin-bottom: 8px;
-    }
-
-    .card-hr {
-        border: 0;
-        border-top: 1px solid #1e293b;
-        margin: 10px 0;
-    }
-
-    .due-date-text {
-        color: #94a3b8;
-        font-size: 0.82rem;
-        font-weight: 500;
-    }
-
-    .days-badge {
-        background-color: #1e293b;
-        color: #cbd5e1;
-        border-radius: 4px;
-        padding: 2px 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-
-    .prio-label {
-        color: #818cf8;
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-    }
-
-    .meta-row {
-        color: #94a3b8;
-        font-size: 0.8rem;
-        margin-top: 4px;
-    }
-
-    .ai-day-card {
-        background-color: #0c1322;
+    .slot-badge {
+        background: #111827;
+        color: #38bdf8;
         border: 1px solid #1e293b;
-        border-radius: 10px;
+        padding: 3px 8px;
+        border-radius: 5px;
+        font-family: monospace;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    /* AI Day Card Layout */
+    .ai-day-card {
+        background-color: #0b0f19;
+        border: 1px solid #1f293d;
+        border-radius: 8px;
         padding: 14px;
         margin-bottom: 12px;
     }
 
     .ai-day-title {
-        color: #38bdf8;
-        font-size: 1rem;
+        color: #e5e7eb;
+        font-size: 0.92rem;
         font-weight: 700;
-        margin-bottom: 8px;
-        border-bottom: 1px solid #1e293b;
-        padding-bottom: 4px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #111827;
+        padding-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
     }
 
-    .time-slot-badge {
-        background-color: #1e1b4b;
-        color: #38bdf8;
-        border: 1px solid #0284c7;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-weight: 700;
-        font-size: 0.82rem;
+    .busy-text {
+        color: #6b7280;
+        font-size: 0.78rem;
+        margin-bottom: 8px;
+    }
+
+    /* Animated CSS Undo Banner */
+    .undo-toast-box {
+        position: relative;
+        background-color: #0f172a;
+        border: 1px solid #3b82f6;
+        border-radius: 8px;
+        padding: 10px 16px;
+        margin-bottom: 16px;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .undo-progress-bar {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        height: 3px;
+        background-color: #3b82f6;
+        width: 100%;
+        animation: countdown-anim 15s linear forwards;
+    }
+
+    @keyframes countdown-anim {
+        from { width: 100%; }
+        to { width: 0%; }
     }
     </style>
     """,
@@ -360,7 +335,6 @@ def priority_to_int(label: str) -> int:
 
 
 def parse_eta_to_mins(eta_raw: Any) -> int:
-    """Parses duration strings like '10-20 mins/day', '1 hour', or '45 mins' into clean minute integers."""
     if not eta_raw or pd.isna(eta_raw):
         return 30
     s = str(eta_raw).lower().strip()
@@ -380,14 +354,12 @@ def parse_eta_to_mins(eta_raw: Any) -> int:
 
 
 def is_study_task(atype: str, title: str, notes: str) -> bool:
-    """Checks if an entry actively involves studying for tests/quizzes."""
     content = f"{atype} {title} {notes}".lower()
     keywords = ["study", "studying", "review", "prep", "prepping", "practice", "flashcard", "quiz", "test", "exam"]
     return any(kw in content for kw in keywords)
 
 
 def format_study_display_title(raw_title: str) -> str:
-    """Ensures test study tasks clearly say 'Study for [Title]' instead of implying a test every day."""
     t_lower = raw_title.lower()
     study_words = ["study", "review", "prep", "practice", "flashcard"]
     if any(w in t_lower for w in study_words):
@@ -691,7 +663,6 @@ def on_undo_daily_slot():
         s_key = undo_info["slot_key"]
         if "_completed_daily_slots" in st.session_state:
             st.session_state["_completed_daily_slots"].discard(s_key)
-        # Reset widget states that contain this slot key
         for k in list(st.session_state.keys()):
             if s_key in k:
                 st.session_state[k] = False
@@ -740,14 +711,10 @@ def format_mdy(d: Optional[date]) -> str:
 
 def days_left(d: Optional[date]) -> Tuple[str, int]:
     if not d:
-        return ("0d left", 0)
+        return ("0d", 0)
     today = get_local_now().date()
     delta = (d - today).days
-    if delta < 0:
-        return (f"{delta}d left", delta)
-    if delta == 0:
-        return ("0d left", 0)
-    return (f"{delta}d left", delta)
+    return (f"{delta}d left" if delta >= 0 else f"{delta}d overdue", delta)
 
 
 # -----------------------
@@ -810,10 +777,10 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         day_date = today + timedelta(days=i)
         day_name = DAYS_OF_WEEK[day_date.weekday()]
 
-        if day_date.weekday() in (5, 6):  # Weekend
+        if day_date.weekday() in (5, 6):
             default_start_mins = 10 * 60
             DAY_END_MINS = 20 * 60
-        else:  # Weekday
+        else:
             default_start_mins = 15 * 60 + 30
             DAY_END_MINS = 21 * 60
 
@@ -898,34 +865,34 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
 # Terminal Auth Interface
 # -----------------------
 def render_terminal_auth_page():
-    c_left, c_center, c_right = st.columns([1, 1.8, 1])
+    c_left, c_center, c_right = st.columns([1, 1.6, 1])
 
     with c_center:
         st.markdown(
             """
-            <div style="background-color: #0c1322; border: 1.5px solid #2563eb; border-radius: 12px; padding: 32px 24px; text-align: center; margin-bottom: 16px;">
-                <div style="font-size: 2.2rem; font-weight: 800; color: #ffffff;">🛡️ Assignment Tracker</div>
-                <div style="font-size: 0.92rem; color: #94a3b8; margin-top: 8px;">Simsbury High School Assignment Portal</div>
+            <div style="background-color: #0b0f19; border: 1px solid #1f293d; border-radius: 12px; padding: 32px 28px; text-align: center; margin-bottom: 20px;">
+                <div style="font-size: 1.8rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">Assignment Tracker</div>
+                <div style="font-size: 0.85rem; color: #6b7280; margin-top: 4px;">Simsbury High School Portal</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        st.markdown('<div style="background-color: #0c1322; border: 1px solid #1e293b; border-radius: 12px; padding: 24px 28px;">', unsafe_allow_html=True)
+        st.markdown('<div style="background-color: #0b0f19; border: 1px solid #1f293d; border-radius: 12px; padding: 24px 28px;">', unsafe_allow_html=True)
 
         mode = st.radio("Action Mode", ["Sign In", "Sign Up"], horizontal=True, label_visibility="collapsed", key="terminal_mode")
 
         raw_user_input = st.text_input(
-            "Enter Username / Email:",
-            placeholder="30guptaa or username@simsburyschools.net",
+            "Username or Email",
+            placeholder="e.g. 30guptaa or username@simsburyschools.net",
             key="terminal_user"
         )
 
-        password = st.text_input("Password:", type="password", key="terminal_pw")
+        password = st.text_input("Password", type="password", key="terminal_pw")
         typed_user = raw_user_input.strip()
-        btn_label = "🔑 Sign In to Terminal" if mode == "Sign In" else "📝 Register Account"
+        btn_label = "Sign In" if mode == "Sign In" else "Register Account"
 
-        if st.button(btn_label, key="auth_submit_btn"):
+        if st.button(btn_label, key="auth_submit_btn", use_container_width=True):
             email_val = typed_user
             if email_val and "@" not in email_val:
                 email_val = f"{email_val}{DEFAULT_DOMAIN}"
@@ -933,13 +900,13 @@ def render_terminal_auth_page():
             password_val = password.strip()
 
             if not email_val or not password_val:
-                st.error("Please enter both a username/email and a password.")
+                st.error("Please enter both credentials.")
             elif mode == "Sign Up":
                 res = sign_up_user(email_val, password_val)
                 if "error" in res:
                     st.error(f"Sign up failed: {res['error']}")
                 else:
-                    st.success(f"Sign up successful for {email_val}! You can now sign in.")
+                    st.success(f"Registered {email_val}. You can now sign in.")
             else:
                 res = sign_in_user(email_val, password_val)
                 if "error" in res:
@@ -960,7 +927,7 @@ def render_terminal_auth_page():
 # -----------------------
 def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
     if df_grid.empty:
-        st.markdown("<div style='padding:60px 0; text-align:center; color:#64748b; font-size:1rem;'>🎉 No assignments found in this view.</div>", unsafe_allow_html=True)
+        st.markdown("<div style='padding:50px 0; text-align:center; color:#4b5563; font-size:0.9rem;'>No assignments in this view.</div>", unsafe_allow_html=True)
         return
 
     df_sorted = df_grid.copy()
@@ -985,6 +952,7 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
 
                     status = st.session_state.get(f"{key_prefix}status_sel_{aid}") or row.get("status") or "Not Started"
                     prio_label = priority_to_label(row.get("priority"))
+                    prio_cls = f"prio-{prio_label.lower()}"
                     row_dict = row.to_dict()
 
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.6, 1.2, 2.2])
@@ -1001,10 +969,10 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                         )
 
                     with c_top2:
-                        st.markdown(f"<span class='course-badge'>{course}</span>", unsafe_allow_html=True)
+                        st.markdown(f"<span class='course-chip'>{course}</span>", unsafe_allow_html=True)
 
                     with c_top3:
-                        if st.button("✏️ Edit", key=f"{key_prefix}edit_btn_{aid}"):
+                        if st.button("Edit", key=f"{key_prefix}edit_btn_{aid}"):
                             st.session_state["_edit_assignment_id"] = aid
                             safe_rerun()
 
@@ -1020,38 +988,24 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                             args=(aid, row_dict, sel_key)
                         )
 
-                    st.markdown(f"<div class='card-title'>{title}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='card-type'>📌 {atype}</div>", unsafe_allow_html=True)
-                    st.markdown("<hr class='card-hr'/>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:1.1rem; font-weight:700; color:#f9fafb; margin-top:8px;'>{title}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color:#6b7280; font-size:0.78rem; margin-bottom:8px;'>{atype}</div>", unsafe_allow_html=True)
 
                     c_bot1, c_bot2 = st.columns([1.5, 1.8])
                     with c_bot1:
-                        st.markdown(
-                            f"<div class='due-date-text'>📅 {due_text} <span class='days-badge'>{days_text}</span></div>",
-                            unsafe_allow_html=True,
-                        )
+                        st.markdown(f"<div style='color:#9ca3af; font-size:0.78rem;'>Due {due_text} ({days_text})</div>", unsafe_allow_html=True)
                     with c_bot2:
-                        st.markdown(f"<div class='prio-label'>PRIORITY</div>", unsafe_allow_html=True)
-                        prio_key = f"{key_prefix}prio_sel_{aid}"
-                        st.selectbox(
-                            "Priority",
-                            PRIORITY_OPTIONS,
-                            index=PRIORITY_OPTIONS.index(prio_label),
-                            key=prio_key,
-                            label_visibility="collapsed",
-                            on_change=on_priority_change,
-                            args=(aid, row_dict, prio_key)
-                        )
+                        st.markdown(f"<div class='{prio_cls}'>Priority: {prio_label}</div>", unsafe_allow_html=True)
 
                     eta = str(row.get("eta") or "").strip()
                     notes = str(row.get("notes") or "").strip()
 
                     if eta:
-                        st.markdown(f"<div class='meta-row'>⏱️ Duration: {eta}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='color:#6b7280; font-size:0.75rem; margin-top:4px;'>Est: {eta}</div>", unsafe_allow_html=True)
 
                     if notes:
-                        note_preview = notes if len(notes) <= 120 else notes[:117] + "..."
-                        st.markdown(f"<div class='meta-row'>📝 {note_preview}</div>", unsafe_allow_html=True)
+                        note_preview = notes if len(notes) <= 90 else notes[:87] + "..."
+                        st.markdown(f"<div style='color:#6b7280; font-size:0.75rem; margin-top:2px;'>{note_preview}</div>", unsafe_allow_html=True)
 
 
 # -----------------------
@@ -1061,20 +1015,16 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
 def show_welcome_courses_dialog(user_id: str):
     st.session_state["_show_welcome_courses_modal"] = False
 
-    st.markdown("### 🎓 Welcome to Assignment Tracker!")
-    st.write("Please list the subjects or classes you are taking this term:")
-
+    st.markdown("### Setup Your Courses")
     courses_input = st.text_area(
-        "Enter your classes (comma separated):",
+        "Enter your subjects (comma separated):",
         value="MATH, SCIENCE, ENGLISH, HISTORY",
-        help="Example: MATH, SCIENCE, SPANISH, AP PHYSICS"
     )
 
-    if st.button("Save Schedule & Start", key="save_initial_courses_btn"):
+    if st.button("Save Schedule", key="save_initial_courses_btn"):
         parsed_courses = [c.strip().upper() for c in courses_input.replace("\n", ",").split(",") if c.strip()]
         if parsed_courses:
             _write_courses_file(user_id, parsed_courses)
-            st.success("Classes saved successfully!")
             safe_rerun()
 
 
@@ -1084,14 +1034,14 @@ def show_add_assignment_dialog(user_id: str):
     courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
 
     with st.form("add_assignment_form"):
-        title = st.text_input("Assignment Name", key="add_title")
-        course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key="add_course_choice")
-        course_free = st.text_input("Or type a new course name", value="", key="add_course_free")
+        title = st.text_input("Assignment Title", key="add_title")
+        course_choice = st.selectbox("Course", options=[""] + courses, index=0, key="add_course_choice")
+        course_free = st.text_input("Or custom course name", value="", key="add_course_free")
         status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
-        due = st.date_input("Due Date (MM/DD/YYYY)", value=get_local_now().date(), key="add_due")
-        importance_label = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_prio_select")
-        atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
-        eta = st.text_input("Estimated Duration (e.g., 15 mins, 1 hour)", key="add_eta")
+        due = st.date_input("Due Date", value=get_local_now().date(), key="add_due")
+        importance_label = st.selectbox("Priority", PRIORITY_OPTIONS, index=1, key="add_prio_select")
+        atype = st.selectbox("Type", TYPE_OPTIONS, index=0, key="add_atype")
+        eta = st.text_input("Estimated Duration (e.g. 30 mins)", key="add_eta")
         notes = st.text_area("Notes", value="", key="add_notes")
         submitted_add = st.form_submit_button("Add Assignment")
 
@@ -1135,14 +1085,14 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
     courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
 
     with st.form("edit_assignment_form"):
-        title = st.text_input("Assignment Name", value=assignment_record.get("title", ""), key=f"edit_title_{aid}")
+        title = st.text_input("Assignment Title", value=assignment_record.get("title", ""), key=f"edit_title_{aid}")
         course_choice = st.selectbox(
-            "Subject / Course",
+            "Course",
             options=[""] + courses,
             index=(0 if assignment_record.get("course", "") not in courses else courses.index(assignment_record.get("course", "")) + 1),
             key=f"edit_course_choice_{aid}",
         )
-        course_free = st.text_input("Or type a course name", value=assignment_record.get("course", ""), key=f"edit_course_free_{aid}")
+        course_free = st.text_input("Or custom course name", value=assignment_record.get("course", ""), key=f"edit_course_free_{aid}")
         status = st.selectbox(
             "Status",
             STATUS_OPTIONS,
@@ -1150,16 +1100,16 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
             key=f"edit_status_{aid}",
         )
         due_parsed = parse_date_iso_or_empty(assignment_record.get("due_date")) or get_local_now().date()
-        due = st.date_input("Due Date (MM/DD/YYYY)", value=due_parsed, key=f"edit_due_{aid}")
+        due = st.date_input("Due Date", value=due_parsed, key=f"edit_due_{aid}")
         curr_prio_label = priority_to_label(assignment_record.get("priority"))
         importance_label = st.selectbox(
-            "Priority Level",
+            "Priority",
             PRIORITY_OPTIONS,
             index=PRIORITY_OPTIONS.index(curr_prio_label),
             key=f"edit_prio_select_{aid}"
         )
         atype = st.selectbox(
-            "Assignment Type",
+            "Type",
             TYPE_OPTIONS,
             index=(TYPE_OPTIONS.index(assignment_record.get("atype")) if assignment_record.get("atype") in TYPE_OPTIONS else 0),
             key=f"edit_atype_{aid}",
@@ -1171,7 +1121,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
         with c_save:
             updated_click = st.form_submit_button("Save Changes")
         with c_del:
-            delete_click = st.form_submit_button("🗑️ Delete Assignment")
+            delete_click = st.form_submit_button("Delete Assignment")
 
         if updated_click:
             course_val = (course_free.strip() or course_choice or "GENERAL").upper()
@@ -1218,7 +1168,7 @@ def show_manage_courses_dialog(user_id: str):
         safe_rerun()
 
     st.markdown("---")
-    new_course = st.text_input("Add a new course", key="new_course_field", placeholder="e.g. AP CALCULUS")
+    new_course = st.text_input("Add a new course", key="new_course_field")
     if st.button("Add Course", key="add_course_button"):
         v = new_course.strip().upper()
         if v and v not in courses:
@@ -1268,23 +1218,23 @@ if st.session_state.get("_open_manage_courses", False):
 # -----------------------
 # Main App Header
 # -----------------------
-col_header_left, col_header_right = st.columns([1.2, 3.8])
+col_header_left, col_header_right = st.columns([2, 3])
 
 with col_header_left:
     st.markdown(
-        """
+        f"""
         <div>
-            <div class="app-title">📋 Assignment Tracker 📝</div>
-            <div class="app-subtitle">Your Assignment Tracker.</div>
+            <div class="app-title">Assignment Tracker</div>
+            <div class="app-subtitle">{email}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 with col_header_right:
-    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.2, 1.2, 1.3, 0.9, 2.2])
+    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1.2, 1.2, 1.2, 0.9])
     with btn_col1:
-        if st.button("🧹 Clear Completed", key="toolbar_clear"):
+        if st.button("Clear Done", key="toolbar_clear"):
             df_active = fetch_assignments(user_id)
             if not df_active.empty:
                 done_ids = df_active[df_active["status"] == "Done"]["id"].tolist()
@@ -1292,25 +1242,20 @@ with col_header_right:
                     delete_assignment(aid)
             safe_rerun()
     with btn_col2:
-        if st.button("➕ Add Assignment", key="toolbar_add"):
+        if st.button("New Task", key="toolbar_add"):
             st.session_state["_open_add_modal"] = True
             safe_rerun()
     with btn_col3:
-        if st.button("📚 Change Courses", key="toolbar_courses"):
+        if st.button("Courses", key="toolbar_courses"):
             st.session_state["_open_manage_courses"] = True
             safe_rerun()
     with btn_col4:
-        if st.button("🚪 Sign Out", key="toolbar_signout"):
+        if st.button("Sign Out", key="toolbar_signout"):
             sign_out_user()
-    with btn_col5:
-        st.markdown(
-            f'<div style="background-color:#0f172a; border:1px solid #1e293b; border-radius:20px; padding:6px 14px; font-size:0.82rem; color:#94a3b8; display:inline-flex; align-items:center; gap:6px;">🟢 {email}</div>',
-            unsafe_allow_html=True,
-        )
 
 today_str = get_local_now().strftime("%A, %B %d, %Y")
 st.markdown(
-    f'<div class="calendar-banner-box">📅 Today\'s Date: {today_str}</div>',
+    f'<div class="date-banner">Date: {today_str}</div>',
     unsafe_allow_html=True,
 )
 
@@ -1323,9 +1268,9 @@ df_all = st.session_state.df_cached.copy()
 # Navigation Tabs
 # -----------------------
 tab_assignments, tab_tests, tab_schedule = st.tabs([
-    "📋 Assignments", 
-    "🧪 Tests & Quizzes", 
-    "📅 Weekly Schedule & AI Planner"
+    "Assignments", 
+    "Tests & Quizzes", 
+    "Weekly Schedule & AI Planner"
 ])
 
 # TAB 1: Regular Assignments
@@ -1345,19 +1290,19 @@ with tab_schedule:
     user_schedule = _read_schedule_file(user_id)
 
     with col_sched_left:
-        st.markdown("### 🕒 Add Weekly Commitments")
-        st.caption("Enter recurring events in 12-hour AM/PM time so the AI knows when you are busy.")
+        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f3f4f6;'>Weekly Commitments</div>", unsafe_allow_html=True)
+        st.caption("Enter recurring busy blocks so the AI plans around them.")
 
         with st.form("add_schedule_event_form"):
             s_day = st.selectbox("Day of Week", DAYS_OF_WEEK)
-            s_title = st.text_input("Event Name", placeholder="e.g. Soccer Practice, Math Class")
+            s_title = st.text_input("Event Name", placeholder="e.g. Robotics, Practice")
             c_time1, c_time2 = st.columns(2)
             with c_time1:
-                s_start_raw = st.text_input("Start Time", value="3:30 PM", help="Format: e.g., 2:10 PM or 3:30 PM", key="sched_start_input")
+                s_start_raw = st.text_input("Start Time", value="3:30 PM", key="sched_start_input")
             with c_time2:
-                s_end_raw = st.text_input("End Time", value="5:00 PM", help="Format: e.g., 3:15 PM or 5:00 PM", key="sched_end_input")
+                s_end_raw = st.text_input("End Time", value="5:00 PM", key="sched_end_input")
 
-            if st.form_submit_button("➕ Add Commitment"):
+            if st.form_submit_button("Add Block"):
                 st_time = parse_time_str(s_start_raw)
                 end_time = parse_time_str(s_end_raw)
                 if s_title.strip() and st_time and end_time:
@@ -1371,59 +1316,74 @@ with tab_schedule:
                         "end": formatted_end
                     })
                     _write_schedule_file(user_id, user_schedule)
-                    st.success("Commitment saved!")
                     safe_rerun()
-                else:
-                    st.error("Please enter a valid event name and 12-hour start/end times (e.g., 2:10 PM, 3:15 PM).")
 
         st.markdown("---")
-        st.markdown("#### Your Active Weekly Blocks")
         if user_schedule:
             for idx, item in enumerate(user_schedule):
                 col_item_a, col_item_b = st.columns([4, 1])
                 with col_item_a:
-                    st.markdown(f"**{item.get('day')}**: {item.get('title')} (`{item.get('start')} - {item.get('end')}`)")
+                    st.markdown(f"<span style='color:#9ca3af; font-size:0.82rem;'>**{item.get('day')}**: {item.get('title')} ({item.get('start')} - {item.get('end')})</span>", unsafe_allow_html=True)
                 with col_item_b:
-                    if st.button("🗑️", key=f"del_sched_{idx}"):
+                    if st.button("Remove", key=f"del_sched_{idx}"):
                         user_schedule.pop(idx)
                         _write_schedule_file(user_id, user_schedule)
                         safe_rerun()
-        else:
-            st.info("No recurring events added yet. Add your practice or work blocks above!")
 
     with col_sched_right:
-        st.markdown("### 🤖 AI Daily Action Plan")
-        st.caption("Schedules study tasks across available days based on due dates, priority, and busy blocks.")
+        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f3f4f6;'>AI Daily Action Plan</div>", unsafe_allow_html=True)
+        st.caption("Optimized timeline across available days based on due dates & priority.")
 
-        # Undo Notification Bar (20-Second Transient Timer)
+        # Real-time JS-driven Undo Toast with Animated Progress Bar
         undo_state = st.session_state.get("_undo_slot_state")
         if undo_state:
             elapsed = (get_local_now() - undo_state["time"]).total_seconds()
-            if elapsed <= 20:
-                u_col1, u_col2 = st.columns([4, 1])
+            remaining_sec = max(0, 15 - elapsed)
+
+            if remaining_sec > 0:
+                u_col1, u_col2 = st.columns([4.2, 1])
                 with u_col1:
-                    st.info(f"✅ Finished **{undo_state['title']}** for today! ({int(20 - elapsed)}s remaining to undo)")
+                    st.markdown(
+                        f"""
+                        <div class="undo-toast-box">
+                            <span style="font-size: 0.85rem; color: #f3f4f6;">Completed <b>{undo_state['title']}</b> for today</span>
+                            <div class="undo-progress-bar" style="animation-duration: {remaining_sec}s;"></div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
                 with u_col2:
-                    if st.button("↩️ Undo", key="btn_undo_slot", on_click=on_undo_daily_slot):
+                    if st.button("Undo", key="btn_undo_slot", on_click=on_undo_daily_slot):
                         safe_rerun()
+
+                # Invisible JS timer component to trigger page refresh precisely when 15s timer expires
+                components.html(
+                    f"""
+                    <script>
+                        setTimeout(function() {{
+                            window.parent.postMessage({{type: 'streamlit:rerun'}}, '*');
+                        }}, {int(remaining_sec * 1000)});
+                    </script>
+                    """,
+                    height=0,
+                )
             else:
                 del st.session_state["_undo_slot_state"]
 
         ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1.5, 1.2, 1.3])
 
         with ctrl_col1:
-            gen_plan_click = st.button("✨ Generate AI Schedule Plan", key="btn_gen_ai_plan")
+            gen_plan_click = st.button("Re-Calculate Plan", key="btn_gen_ai_plan")
 
         with ctrl_col2:
             show_time_slots = st.toggle("Show Time Slots", value=True, key="toggle_show_time_slots")
 
         with ctrl_col3:
             max_daily_study = st.selectbox(
-                "Max Study / Day",
+                "Max Work / Day",
                 options=[45, 60, 90, 120, 180],
                 index=1,
                 format_func=lambda x: f"{x} mins max",
-                help="Spreads out work across multiple days so you aren't overwhelmed on a single day."
             )
 
         fresh_assignments = fetch_assignments(user_id)
@@ -1441,9 +1401,9 @@ with tab_schedule:
         plan = plan_res.get("plan", {})
 
         if status == "no_tasks":
-            st.info("ℹ️ You have no assignments created yet. Add assignments in the 'Assignments' or 'Tests & Quizzes' tab first!")
+            st.info("No active assignments. Add items in the 'Assignments' or 'Tests & Quizzes' tab.")
         elif status == "all_done":
-            st.success("🎉 All assignments are marked as 'Done'! Nothing to schedule.")
+            st.success("All assignments marked completed.")
         elif status == "success" and plan:
             completed_set = st.session_state.get("_completed_daily_slots", set())
 
@@ -1455,11 +1415,11 @@ with tab_schedule:
                     safe_rerun()
                     break
 
-                st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">📅 {day_name}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">{day_name}</div>', unsafe_allow_html=True)
 
                 busy_list = day_data.get("busy", [])
                 if busy_list:
-                    st.caption("Busy: " + ", ".join([f"🚫 {b}" for b in busy_list]))
+                    st.markdown(f"<div class='busy-text'>Busy: {', '.join(busy_list)}</div>", unsafe_allow_html=True)
 
                 raw_slots = day_data.get("slots", [])
                 visible_slots = [s for s in raw_slots if s.get("slot_key") not in completed_set]
@@ -1469,7 +1429,7 @@ with tab_schedule:
                         s_key = s.get("slot_key")
                         slot_prio = s.get("priority", priority_to_label(s.get("importance")))
 
-                        c_chk, c_text = st.columns([0.4, 7.6])
+                        c_chk, c_text = st.columns([0.35, 7.65])
                         with c_chk:
                             chk_widget_key = f"chk_{s_key}_{idx_slot}"
                             st.checkbox(
@@ -1484,14 +1444,15 @@ with tab_schedule:
                         with c_text:
                             if show_time_slots:
                                 st.markdown(
-                                    f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Priority: **{slot_prio}** ({s['eta_mins']} mins)",
+                                    f"<span class='slot-badge'>{s['time']}</span> <b style='color:#f3f4f6;'>{s['title']}</b> <span class='course-chip'>{s['course']}</span> <span style='color:#9ca3af; font-size:0.78rem;'>• Priority: {slot_prio} ({s['eta_mins']}m)</span>",
                                     unsafe_allow_html=True
                                 )
                             else:
                                 st.markdown(
-                                    f"▫️ **{s['title']}** (`{s['course']}`) — Priority: **{slot_prio}** ({s['eta_mins']} mins)"
+                                    f"<b style='color:#f3f4f6;'>{s['title']}</b> <span class='course-chip'>{s['course']}</span> <span style='color:#9ca3af; font-size:0.78rem;'>• Priority: {slot_prio} ({s['eta_mins']}m)</span>",
+                                    unsafe_allow_html=True
                                 )
                 else:
-                    st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks remaining for this day. Free time!</span>", unsafe_allow_html=True)
+                    st.markdown("<span style='color:#4b5563; font-size:0.82rem;'>No work scheduled for this day.</span>", unsafe_allow_html=True)
 
                 st.markdown('</div>', unsafe_allow_html=True)
