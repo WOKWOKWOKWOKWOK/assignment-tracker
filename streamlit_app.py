@@ -1,6 +1,7 @@
 """
 Assignment Tracker — Fully Migrated to Neon PostgreSQL with Real-Time AI Scheduler
 Features:
+- Fixed Undo Persistence Bug: Explicit widget state clearing restores tasks instantly
 - Fixed StreamlitDuplicateElementKey bug with deterministic slot indexing
 - Daily Task Completion Checkbox with 20-Second Transient Undo Timer
 - Real-Time Clock Integration (America/New_York local time lock)
@@ -673,6 +674,30 @@ def on_priority_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
         upsert_assignments([row_dict])
 
 
+def on_daily_slot_check(slot_key: str, task_title: str):
+    if "_completed_daily_slots" not in st.session_state:
+        st.session_state["_completed_daily_slots"] = set()
+    st.session_state["_completed_daily_slots"].add(slot_key)
+    st.session_state["_undo_slot_state"] = {
+        "slot_key": slot_key,
+        "title": task_title,
+        "time": get_local_now()
+    }
+
+
+def on_undo_daily_slot():
+    undo_info = st.session_state.get("_undo_slot_state")
+    if undo_info:
+        s_key = undo_info["slot_key"]
+        if "_completed_daily_slots" in st.session_state:
+            st.session_state["_completed_daily_slots"].discard(s_key)
+        # Reset widget states that contain this slot key
+        for k in list(st.session_state.keys()):
+            if s_key in k:
+                st.session_state[k] = False
+        del st.session_state["_undo_slot_state"]
+
+
 # -----------------------
 # Date & Time Helpers
 # -----------------------
@@ -841,10 +866,10 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
                         start_str = time(st_m // 60, st_m % 60).strftime("%I:%M %p").lstrip("0")
                         end_str = time(end_m // 60, end_m % 60).strftime("%I:%M %p").lstrip("0")
 
-                        slot_idx = len(plan[day_name]["slots"])
                         plan[day_name]["slots"].append({
-                            "slot_id": f"{t['id']}_{day_date.isoformat()}_{slot_idx}",
+                            "slot_key": f"daily_{t['id']}_{day_date.isoformat()}",
                             "task_id": t["id"],
+                            "day_date_str": day_date.isoformat(),
                             "time": f"{start_str} - {end_str}",
                             "title": t["title"],
                             "course": t["course"],
@@ -1379,9 +1404,7 @@ with tab_schedule:
                 with u_col1:
                     st.info(f"✅ Finished **{undo_state['title']}** for today! ({int(20 - elapsed)}s remaining to undo)")
                 with u_col2:
-                    if st.button("↩️ Undo", key="btn_undo_slot"):
-                        st.session_state["_completed_daily_slots"].discard(undo_state["slot_id"])
-                        del st.session_state["_undo_slot_state"]
+                    if st.button("↩️ Undo", key="btn_undo_slot", on_click=on_undo_daily_slot):
                         safe_rerun()
             else:
                 del st.session_state["_undo_slot_state"]
@@ -1422,7 +1445,7 @@ with tab_schedule:
         elif status == "all_done":
             st.success("🎉 All assignments are marked as 'Done'! Nothing to schedule.")
         elif status == "success" and plan:
-            completed_set = st.session_state["_completed_daily_slots"]
+            completed_set = st.session_state.get("_completed_daily_slots", set())
 
             for day_name, day_data in plan.items():
                 if not isinstance(day_data, dict):
@@ -1439,24 +1462,24 @@ with tab_schedule:
                     st.caption("Busy: " + ", ".join([f"🚫 {b}" for b in busy_list]))
 
                 raw_slots = day_data.get("slots", [])
-                visible_slots = [s for s in raw_slots if s.get("slot_id") not in completed_set]
+                visible_slots = [s for s in raw_slots if s.get("slot_key") not in completed_set]
 
                 if visible_slots:
                     for idx_slot, s in enumerate(visible_slots):
-                        s_id = s.get("slot_id")
+                        s_key = s.get("slot_key")
                         slot_prio = s.get("priority", priority_to_label(s.get("importance")))
 
                         c_chk, c_text = st.columns([0.4, 7.6])
                         with c_chk:
-                            chk_key = f"chk_day_done_{s_id}_{idx_slot}"
-                            if st.checkbox("Done Today", key=chk_key, label_visibility="collapsed"):
-                                st.session_state["_completed_daily_slots"].add(s_id)
-                                st.session_state["_undo_slot_state"] = {
-                                    "slot_id": s_id,
-                                    "title": s["title"],
-                                    "time": get_local_now()
-                                }
-                                safe_rerun()
+                            chk_widget_key = f"chk_{s_key}_{idx_slot}"
+                            st.checkbox(
+                                "Done Today",
+                                value=False,
+                                key=chk_widget_key,
+                                label_visibility="collapsed",
+                                on_change=on_daily_slot_check,
+                                args=(s_key, s["title"])
+                            )
 
                         with c_text:
                             if show_time_slots:
