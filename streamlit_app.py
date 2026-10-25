@@ -1,13 +1,10 @@
 """
-Assignment Tracker — Pro Layout & Alignment Edition
-Features:
-- Fixed Card Layout: Duration (Est) now sits cleanly inside column 1 under Due Date
-- Ample Card Bottom Padding: Eliminates border squishing on card elements
-- Unified Cross-Platform Emoji Font Stack for crisp header and button icons
-- Fixed Checkbox <-> Status Dropdown State Sync (In Progress <-> Done toggle)
-- Dynamic Color-Coded Subject Badges (Math, Science, History, English, Languages)
-- Real-Time JS/CSS Animated Undo Progress Toast
-- Multi-tenant Neon PostgreSQL storage with isolated user accounts
+Assignment Tracker — Executive Clean Edition
+Fixes:
+- Card Height & Alignment: Est time sits horizontally beside Due Date to eliminate bottom squishing
+- Removed cluttered/childish emojis for a sleek, high-end professional dark theme
+- Preserved precise Checkbox <-> Status Dropdown bidirectional state sync
+- Dynamic subject badges, real-time JS progress toast, multi-tenant Neon PostgreSQL
 """
 
 from __future__ import annotations
@@ -35,7 +32,7 @@ def get_local_now() -> datetime:
 
 
 # -----------------------
-# Streamlit Page Config & Pro CSS Overrides
+# Streamlit Page Config & Executive CSS Overrides
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
@@ -47,13 +44,13 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-    /* Global Dark Canvas with Universal Emoji Stack */
+    /* Canvas & Global Typography */
     html, body, .stApp {
         background-color: #070a12 !important;
         color: #f1f5f9 !important;
-        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
     }
 
     .main .block-container {
@@ -67,40 +64,39 @@ st.markdown(
     div[data-testid="stToolbar"], div[data-testid="stDecoration"], div[data-testid="stStatusWidget"] {display: none !important;}
     section[data-testid="stSidebar"], div[data-testid="collapsedControl"], button[data-testid="stSidebarCollapseButton"] {display: none !important;}
 
-    /* Tabs Styling */
+    /* Modern Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
+        gap: 8px;
         background-color: transparent;
         border-bottom: 1px solid #1e293b;
         margin-bottom: 20px;
     }
 
     .stTabs [data-baseweb="tab"] {
-        height: 40px;
-        border-radius: 8px;
+        height: 38px;
+        border-radius: 6px;
         color: #94a3b8;
-        font-weight: 600;
-        font-size: 0.88rem;
-        padding: 8px 18px;
+        font-weight: 500;
+        font-size: 0.85rem;
+        padding: 6px 16px;
         background-color: #0f172a;
         border: 1px solid #1e293b;
     }
 
     .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%) !important;
+        background-color: #1e1b4b !important;
         color: #a5b4fc !important;
         border-color: #6366f1 !important;
-        box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
     }
 
-    /* Card Containers with Enhanced Padding */
+    /* Card Containers with Generous Padding */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
-        border-radius: 12px !important;
-        padding: 18px 18px 20px 18px !important;
+        border-radius: 10px !important;
+        padding: 18px 18px 18px 18px !important;
         margin-bottom: 16px !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
         transition: border-color 0.2s ease;
     }
 
@@ -108,16 +104,13 @@ st.markdown(
         border-color: #334155 !important;
     }
 
-    /* Headers */
+    /* Header & Banner Elements */
     .app-title {
-        font-size: 1.75rem;
+        font-size: 1.6rem;
         font-weight: 800;
-        color: #ffffff;
+        color: #f8fafc;
         letter-spacing: -0.02em;
         margin: 0;
-        display: flex;
-        align-items: center;
-        gap: 8px;
     }
 
     .app-subtitle {
@@ -132,7 +125,7 @@ st.markdown(
         border: 1px solid #1e293b;
         border-radius: 8px;
         padding: 8px 16px;
-        font-size: 0.85rem;
+        font-size: 0.82rem;
         font-weight: 600;
         color: #818cf8;
         text-align: center;
@@ -144,33 +137,30 @@ st.markdown(
         background: rgba(244, 63, 94, 0.15);
         color: #fb7185;
         border: 1px solid rgba(244, 63, 94, 0.3);
-        padding: 4px 10px;
-        border-radius: 6px;
+        padding: 2px 8px;
+        border-radius: 5px;
         font-size: 0.75rem;
-        font-weight: 700;
-        display: inline-block;
+        font-weight: 600;
     }
 
     .prio-medium {
         background: rgba(245, 158, 11, 0.15);
         color: #fbbf24;
         border: 1px solid rgba(245, 158, 11, 0.3);
-        padding: 4px 10px;
-        border-radius: 6px;
+        padding: 2px 8px;
+        border-radius: 5px;
         font-size: 0.75rem;
-        font-weight: 700;
-        display: inline-block;
+        font-weight: 600;
     }
 
     .prio-low {
         background: rgba(16, 185, 129, 0.15);
         color: #34d399;
         border: 1px solid rgba(16, 185, 129, 0.3);
-        padding: 4px 10px;
-        border-radius: 6px;
+        padding: 2px 8px;
+        border-radius: 5px;
         font-size: 0.75rem;
-        font-weight: 700;
-        display: inline-block;
+        font-weight: 600;
     }
 
     /* AI Day Card */
@@ -184,11 +174,13 @@ st.markdown(
 
     .ai-day-title {
         color: #38bdf8;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         font-weight: 700;
         margin-bottom: 8px;
         border-bottom: 1px solid #1e293b;
         padding-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
     }
 
     .slot-badge {
@@ -199,10 +191,10 @@ st.markdown(
         border-radius: 5px;
         font-family: monospace;
         font-size: 0.78rem;
-        font-weight: 700;
+        font-weight: 600;
     }
 
-    /* Undo Toast Box */
+    /* Undo Toast Container */
     .undo-toast-box {
         position: relative;
         background-color: #0f172a;
@@ -346,7 +338,7 @@ def get_course_badge_html(course_name: str) -> str:
     else:
         bg, fg, border = "#0c4a6e", "#7dd3fc", "#0284c7"
 
-    return f"<span style='background-color:{bg}; color:{fg}; border:1px solid {border}; padding:3px 10px; border-radius:6px; font-weight:700; font-size:0.75rem; letter-spacing:0.04em; display:inline-block;'>{c}</span>"
+    return f"<span style='background-color:{bg}; color:{fg}; border:1px solid {border}; padding:3px 10px; border-radius:5px; font-weight:700; font-size:0.75rem; letter-spacing:0.03em; display:inline-block;'>{c}</span>"
 
 
 def priority_to_label(val: Any) -> str:
@@ -646,7 +638,7 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Real-Time Callbacks (Fixed Sync for Dropdown & Checkbox)
+# Real-Time Callbacks (Fixed Dropdown State Sync)
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any], chk_key: str, sel_key: str):
     chk_val = st.session_state.get(chk_key, False)
@@ -912,7 +904,7 @@ def render_terminal_auth_page():
     with c_center:
         st.markdown(
             """
-            <div style="background-color: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 32px 28px; text-align: center; margin-bottom: 20px;">
+            <div style="background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 32px 28px; text-align: center; margin-bottom: 20px;">
                 <div style="font-size: 1.8rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">Assignment Tracker</div>
                 <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">Simsbury High School Portal</div>
             </div>
@@ -920,7 +912,7 @@ def render_terminal_auth_page():
             unsafe_allow_html=True,
         )
 
-        st.markdown('<div style="background-color: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 24px 28px;">', unsafe_allow_html=True)
+        st.markdown('<div style="background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 24px 28px;">', unsafe_allow_html=True)
 
         mode = st.radio("Action Mode", ["Sign In", "Sign Up"], horizontal=True, label_visibility="collapsed", key="terminal_mode")
 
@@ -965,7 +957,7 @@ def render_terminal_auth_page():
 
 
 # -----------------------
-# Grid Renderer Component (Fixed Squished Layout & Emoji Stack)
+# Grid Renderer Component (In-line Metadata to Eliminate Squishing)
 # -----------------------
 def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
     if df_grid.empty:
@@ -1000,6 +992,7 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                     prio_cls = f"prio-{prio_label.lower()}"
                     row_dict = row.to_dict()
 
+                    # Top Toolbar: Checkbox, Course Badge, Edit, Status
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.8, 1.1, 2.3])
 
                     with c_top1:
@@ -1031,24 +1024,32 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                             args=(aid, row_dict, sel_key, chk_key)
                         )
 
-                    st.markdown(f"<div style='font-size:1.15rem; font-weight:700; color:#f8fafc; margin-top:8px;'>{title}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='color:#64748b; font-size:0.8rem; margin-top:2px; margin-bottom:12px;'>📌 {atype}</div>", unsafe_allow_html=True)
+                    # Title & Type
+                    st.markdown(f"<div style='font-size:1.15rem; font-weight:700; color:#f8fafc; margin-top:10px;'>{title}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color:#64748b; font-size:0.8rem; margin-top:2px; margin-bottom:12px;'>{atype}</div>", unsafe_allow_html=True)
 
                     eta = str(row.get("eta") or "").strip()
                     notes = str(row.get("notes") or "").strip()
 
-                    # Clean two-column metadata row (prevents bottom squishing)
-                    c_bot1, c_bot2 = st.columns([1.5, 1.5])
-                    with c_bot1:
-                        st.markdown(f"<div style='color:#94a3b8; font-size:0.78rem; font-weight:500;'>📅 {due_text} <span style='color:#64748b;'>({days_text})</span></div>", unsafe_allow_html=True)
-                        if eta:
-                            st.markdown(f"<div style='color:#94a3b8; font-size:0.78rem; margin-top:4px;'>⏱️ Est: {eta}</div>", unsafe_allow_html=True)
-                    with c_bot2:
-                        st.markdown(f"<div class='{prio_cls}' style='text-align:center;'>Priority: {prio_label}</div>", unsafe_allow_html=True)
+                    # Clean Horizontal Metadata Row (Due Date + Est on left, Priority Badge on right)
+                    eta_snippet = f"<span style='color:#64748b; margin-left:6px;'>• Est: {eta}</span>" if eta else ""
+                    
+                    st.markdown(
+                        f"""
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px solid #1e293b;">
+                            <div style="font-size: 0.78rem; color: #94a3b8; display: flex; align-items: center;">
+                                <span>Due {due_text} <span style="color: #64748b;">({days_text})</span></span>
+                                {eta_snippet}
+                            </div>
+                            <div class="{prio_cls}">Priority: {prio_label}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
                     if notes:
                         note_preview = notes if len(notes) <= 90 else notes[:87] + "..."
-                        st.markdown(f"<div style='color:#64748b; font-size:0.75rem; margin-top:8px; border-top:1px solid #1e293b; padding-top:6px;'>📝 {note_preview}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='font-size: 0.75rem; color: #64748b; margin-top: 6px;'>Note: {note_preview}</div>", unsafe_allow_html=True)
 
 
 # -----------------------
@@ -1267,8 +1268,8 @@ with col_header_left:
     st.markdown(
         f"""
         <div>
-            <div class="app-title">📋 Assignment Tracker 📝</div>
-            <div class="app-subtitle">🟢 {email}</div>
+            <div class="app-title">Assignment Tracker</div>
+            <div class="app-subtitle">{email}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1277,7 +1278,7 @@ with col_header_left:
 with col_header_right:
     btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1.3, 1.2, 1.2, 0.9])
     with btn_col1:
-        if st.button("🧹 Clear Completed", key="toolbar_clear"):
+        if st.button("Clear Completed", key="toolbar_clear"):
             df_active = fetch_assignments(user_id)
             if not df_active.empty:
                 done_ids = df_active[df_active["status"] == "Done"]["id"].tolist()
@@ -1285,20 +1286,20 @@ with col_header_right:
                     delete_assignment(aid)
             safe_rerun()
     with btn_col2:
-        if st.button("➕ New Task", key="toolbar_add"):
+        if st.button("New Task", key="toolbar_add"):
             st.session_state["_open_add_modal"] = True
             safe_rerun()
     with btn_col3:
-        if st.button("📚 Courses", key="toolbar_courses"):
+        if st.button("Courses", key="toolbar_courses"):
             st.session_state["_open_manage_courses"] = True
             safe_rerun()
     with btn_col4:
-        if st.button("🚪 Sign Out", key="toolbar_signout"):
+        if st.button("Sign Out", key="toolbar_signout"):
             sign_out_user()
 
 today_str = get_local_now().strftime("%A, %B %d, %Y")
 st.markdown(
-    f'<div class="date-banner">📅 Today\'s Date: {today_str}</div>',
+    f'<div class="date-banner">Today\'s Date: {today_str}</div>',
     unsafe_allow_html=True,
 )
 
@@ -1311,9 +1312,9 @@ df_all = st.session_state.df_cached.copy()
 # Navigation Tabs
 # -----------------------
 tab_assignments, tab_tests, tab_schedule = st.tabs([
-    "📋 Assignments", 
-    "🧪 Tests & Quizzes", 
-    "📅 Weekly Schedule & AI Planner"
+    "Assignments", 
+    "Tests & Quizzes", 
+    "Weekly Schedule & AI Planner"
 ])
 
 # TAB 1: Regular Assignments
@@ -1333,7 +1334,7 @@ with tab_schedule:
     user_schedule = _read_schedule_file(user_id)
 
     with col_sched_left:
-        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f8fafc;'>🕒 Add Weekly Commitments</div>", unsafe_allow_html=True)
+        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f8fafc;'>Weekly Commitments</div>", unsafe_allow_html=True)
         st.caption("Enter recurring busy blocks so the AI plans around them.")
 
         with st.form("add_schedule_event_form"):
@@ -1345,7 +1346,7 @@ with tab_schedule:
             with c_time2:
                 s_end_raw = st.text_input("End Time", value="5:00 PM", key="sched_end_input")
 
-            if st.form_submit_button("➕ Add Block"):
+            if st.form_submit_button("Add Block"):
                 st_time = parse_time_str(s_start_raw)
                 end_time = parse_time_str(s_end_raw)
                 if s_title.strip() and st_time and end_time:
@@ -1366,15 +1367,15 @@ with tab_schedule:
             for idx, item in enumerate(user_schedule):
                 col_item_a, col_item_b = st.columns([4, 1])
                 with col_item_a:
-                    st.markdown(f"<span style='color:#cbd5e1; font-size:0.82rem;'>**{item.get('day')}**: {item.get('title')} (`{item.get('start')} - {item.get('end')}`)</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='color:#cbd5e1; font-size:0.82rem;'>**{item.get('day')}**: {item.get('title')} ({item.get('start')} - {item.get('end')})</span>", unsafe_allow_html=True)
                 with col_item_b:
-                    if st.button("🗑️", key=f"del_sched_{idx}"):
+                    if st.button("Remove", key=f"del_sched_{idx}"):
                         user_schedule.pop(idx)
                         _write_schedule_file(user_id, user_schedule)
                         safe_rerun()
 
     with col_sched_right:
-        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f8fafc;'>🤖 AI Daily Action Plan</div>", unsafe_allow_html=True)
+        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f8fafc;'>AI Daily Action Plan</div>", unsafe_allow_html=True)
         st.caption("Optimized timeline across available days based on due dates & priority.")
 
         # Real-time JS-driven Undo Toast with Animated Progress Bar
@@ -1396,7 +1397,7 @@ with tab_schedule:
                         unsafe_allow_html=True,
                     )
                 with u_col2:
-                    if st.button("↩️ Undo", key="btn_undo_slot", on_click=on_undo_daily_slot):
+                    if st.button("Undo", key="btn_undo_slot", on_click=on_undo_daily_slot):
                         safe_rerun()
 
                 components.html(
@@ -1415,7 +1416,7 @@ with tab_schedule:
         ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1.5, 1.2, 1.3])
 
         with ctrl_col1:
-            gen_plan_click = st.button("✨ Re-Calculate Plan", key="btn_gen_ai_plan")
+            gen_plan_click = st.button("Re-Calculate Plan", key="btn_gen_ai_plan")
 
         with ctrl_col2:
             show_time_slots = st.toggle("Show Time Slots", value=True, key="toggle_show_time_slots")
@@ -1445,7 +1446,7 @@ with tab_schedule:
         if status == "no_tasks":
             st.info("No active assignments. Add items in the 'Assignments' or 'Tests & Quizzes' tab.")
         elif status == "all_done":
-            st.success("🎉 All assignments marked completed!")
+            st.success("All assignments marked completed!")
         elif status == "success" and plan:
             completed_set = st.session_state.get("_completed_daily_slots", set())
 
@@ -1457,11 +1458,11 @@ with tab_schedule:
                     safe_rerun()
                     break
 
-                st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">📅 {day_name}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">{day_name}</div>', unsafe_allow_html=True)
 
                 busy_list = day_data.get("busy", [])
                 if busy_list:
-                    st.caption("Busy: " + ", ".join([f"🚫 {b}" for b in busy_list]))
+                    st.caption("Busy: " + ", ".join(busy_list))
 
                 raw_slots = day_data.get("slots", [])
                 visible_slots = [s for s in raw_slots if s.get("slot_key") not in completed_set]
@@ -1486,7 +1487,7 @@ with tab_schedule:
                         with c_text:
                             if show_time_slots:
                                 st.markdown(
-                                    f"<span class='slot-badge'>⏰ {s['time']}</span> — <b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio} ({s['eta_mins']} mins)</span>",
+                                    f"<span class='slot-badge'>{s['time']}</span> — <b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio} ({s['eta_mins']} mins)</span>",
                                     unsafe_allow_html=True
                                 )
                             else:
