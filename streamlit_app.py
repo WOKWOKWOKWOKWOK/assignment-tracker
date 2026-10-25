@@ -1,11 +1,12 @@
 """
-Assignment Tracker — Pro Color Edition
+Assignment Tracker — Pro Layout & Alignment Edition
 Features:
+- Fixed Card Layout: Duration (Est) now sits cleanly inside column 1 under Due Date
+- Ample Card Bottom Padding: Eliminates border squishing on card elements
+- Unified Cross-Platform Emoji Font Stack for crisp header and button icons
 - Fixed Checkbox <-> Status Dropdown State Sync (In Progress <-> Done toggle)
 - Dynamic Color-Coded Subject Badges (Math, Science, History, English, Languages)
 - Real-Time JS/CSS Animated Undo Progress Toast
-- Real-Time Clock Integration (America/New_York EDT lock)
-- Pre-Due-Date AI Scheduling: All tasks & test prep finish BEFORE due date
 - Multi-tenant Neon PostgreSQL storage with isolated user accounts
 """
 
@@ -34,7 +35,7 @@ def get_local_now() -> datetime:
 
 
 # -----------------------
-# Streamlit Page Config & Pro Color CSS Overrides
+# Streamlit Page Config & Pro CSS Overrides
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
@@ -48,11 +49,11 @@ st.markdown(
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
-    /* Global Dark Canvas with Subtle Depth */
+    /* Global Dark Canvas with Universal Emoji Stack */
     html, body, .stApp {
         background-color: #070a12 !important;
         color: #f1f5f9 !important;
-        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif !important;
     }
 
     .main .block-container {
@@ -92,13 +93,13 @@ st.markdown(
         box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
     }
 
-    /* Card Containers */
+    /* Card Containers with Enhanced Padding */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
         border-radius: 12px !important;
-        padding: 16px !important;
-        margin-bottom: 14px !important;
+        padding: 18px 18px 20px 18px !important;
+        margin-bottom: 16px !important;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
         transition: border-color 0.2s ease;
     }
@@ -111,17 +112,19 @@ st.markdown(
     .app-title {
         font-size: 1.75rem;
         font-weight: 800;
-        background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #ffffff;
         letter-spacing: -0.02em;
         margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
     .app-subtitle {
         font-size: 0.82rem;
         color: #64748b;
         font-weight: 500;
+        margin-top: 2px;
     }
 
     .date-banner {
@@ -133,7 +136,7 @@ st.markdown(
         font-weight: 600;
         color: #818cf8;
         text-align: center;
-        margin-bottom: 16px;
+        margin-bottom: 18px;
     }
 
     /* Priority Pills */
@@ -141,30 +144,33 @@ st.markdown(
         background: rgba(244, 63, 94, 0.15);
         color: #fb7185;
         border: 1px solid rgba(244, 63, 94, 0.3);
-        padding: 2px 8px;
+        padding: 4px 10px;
         border-radius: 6px;
         font-size: 0.75rem;
         font-weight: 700;
+        display: inline-block;
     }
 
     .prio-medium {
         background: rgba(245, 158, 11, 0.15);
         color: #fbbf24;
         border: 1px solid rgba(245, 158, 11, 0.3);
-        padding: 2px 8px;
+        padding: 4px 10px;
         border-radius: 6px;
         font-size: 0.75rem;
         font-weight: 700;
+        display: inline-block;
     }
 
     .prio-low {
         background: rgba(16, 185, 129, 0.15);
         color: #34d399;
         border: 1px solid rgba(16, 185, 129, 0.3);
-        padding: 2px 8px;
+        padding: 4px 10px;
         border-radius: 6px;
         font-size: 0.75rem;
         font-weight: 700;
+        display: inline-block;
     }
 
     /* AI Day Card */
@@ -326,20 +332,19 @@ except Exception as e:
 # Helper Utilities
 # -----------------------
 def get_course_badge_html(course_name: str) -> str:
-    """Returns dynamic color-coded badges based on the subject category."""
     c = str(course_name or "GENERAL").strip().upper()
     if any(k in c for k in ["MATH", "CALC", "STAT", "ALG", "GEO"]):
-        bg, fg, border = "#1e1b4b", "#a5b4fc", "#4338ca"  # Indigo
+        bg, fg, border = "#1e1b4b", "#a5b4fc", "#4338ca"
     elif any(k in c for k in ["SCI", "BIO", "CHEM", "PHYS", "ENV"]):
-        bg, fg, border = "#064e3b", "#6ee7b7", "#059669"  # Emerald
+        bg, fg, border = "#064e3b", "#6ee7b7", "#059669"
     elif any(k in c for k in ["ENG", "LIT", "WRIT", "READ"]):
-        bg, fg, border = "#881337", "#fda4af", "#e11d48"  # Rose
+        bg, fg, border = "#881337", "#fda4af", "#e11d48"
     elif any(k in c for k in ["HIST", "CIV", "GOV", "SOC", "APUSH"]):
-        bg, fg, border = "#78350f", "#fcd34d", "#d97706"  # Amber
+        bg, fg, border = "#78350f", "#fcd34d", "#d97706"
     elif any(k in c for k in ["SPAN", "FRENCH", "LANG", "LATIN"]):
-        bg, fg, border = "#581c87", "#e9d5ff", "#9333ea"  # Purple
+        bg, fg, border = "#581c87", "#e9d5ff", "#9333ea"
     else:
-        bg, fg, border = "#0c4a6e", "#7dd3fc", "#0284c7"  # Sky Blue
+        bg, fg, border = "#0c4a6e", "#7dd3fc", "#0284c7"
 
     return f"<span style='background-color:{bg}; color:{fg}; border:1px solid {border}; padding:3px 10px; border-radius:6px; font-weight:700; font-size:0.75rem; letter-spacing:0.04em; display:inline-block;'>{c}</span>"
 
@@ -960,7 +965,7 @@ def render_terminal_auth_page():
 
 
 # -----------------------
-# Grid Renderer Component
+# Grid Renderer Component (Fixed Squished Layout & Emoji Stack)
 # -----------------------
 def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
     if df_grid.empty:
@@ -1026,24 +1031,24 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                             args=(aid, row_dict, sel_key, chk_key)
                         )
 
-                    st.markdown(f"<div style='font-size:1.1rem; font-weight:700; color:#f8fafc; margin-top:8px;'>{title}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='color:#64748b; font-size:0.8rem; margin-bottom:8px;'>📌 {atype}</div>", unsafe_allow_html=True)
-
-                    c_bot1, c_bot2 = st.columns([1.6, 1.4])
-                    with c_bot1:
-                        st.markdown(f"<div style='color:#94a3b8; font-size:0.78rem;'>📅 {due_text} ({days_text})</div>", unsafe_allow_html=True)
-                    with c_bot2:
-                        st.markdown(f"<div class='{prio_cls}'>Priority: {prio_label}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:1.15rem; font-weight:700; color:#f8fafc; margin-top:8px;'>{title}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color:#64748b; font-size:0.8rem; margin-top:2px; margin-bottom:12px;'>📌 {atype}</div>", unsafe_allow_html=True)
 
                     eta = str(row.get("eta") or "").strip()
                     notes = str(row.get("notes") or "").strip()
 
-                    if eta:
-                        st.markdown(f"<div style='color:#64748b; font-size:0.75rem; margin-top:4px;'>⏱️ Est: {eta}</div>", unsafe_allow_html=True)
+                    # Clean two-column metadata row (prevents bottom squishing)
+                    c_bot1, c_bot2 = st.columns([1.5, 1.5])
+                    with c_bot1:
+                        st.markdown(f"<div style='color:#94a3b8; font-size:0.78rem; font-weight:500;'>📅 {due_text} <span style='color:#64748b;'>({days_text})</span></div>", unsafe_allow_html=True)
+                        if eta:
+                            st.markdown(f"<div style='color:#94a3b8; font-size:0.78rem; margin-top:4px;'>⏱️ Est: {eta}</div>", unsafe_allow_html=True)
+                    with c_bot2:
+                        st.markdown(f"<div class='{prio_cls}' style='text-align:center;'>Priority: {prio_label}</div>", unsafe_allow_html=True)
 
                     if notes:
                         note_preview = notes if len(notes) <= 90 else notes[:87] + "..."
-                        st.markdown(f"<div style='color:#64748b; font-size:0.75rem; margin-top:2px;'>📝 {note_preview}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='color:#64748b; font-size:0.75rem; margin-top:8px; border-top:1px solid #1e293b; padding-top:6px;'>📝 {note_preview}</div>", unsafe_allow_html=True)
 
 
 # -----------------------
