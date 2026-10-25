@@ -1,15 +1,12 @@
 """
-Assignment Tracker — Fully Migrated to Neon PostgreSQL with AI Time-Slot Scheduler
+Assignment Tracker — Fully Migrated to Neon PostgreSQL with Real-Time AI Scheduler
 Features:
-- Neon PostgreSQL storage via SQLAlchemy + psycopg2-binary
-- Multi-tenant user isolation for assignments, courses, and weekly commitments
-- Low / Medium / High simplified priority system
+- Real-Time Clock Integration: Today's schedule starts dynamically from the current minute
+- Pre-Due-Date AI Scheduling: All tasks & test prep finish BEFORE due date
 - Smart duration parser handling ranges (e.g., '10-20 mins/day' -> 15 mins)
-- Strict Pre-Due-Date AI Scheduling: All tasks & test prep finish BEFORE due date
 - Recurring Daily AI Study Planning for Tests & Quizzes with clear "Study for..." labeling
 - Explicit 12-Hour AM/PM Commitment Time Inputs
-- Toggleable exact time-slot display vs. simple bullet view
-- User authentication & automatic schema initialization
+- Multi-tenant Neon PostgreSQL storage with isolated user accounts
 """
 
 from __future__ import annotations
@@ -727,7 +724,14 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
     if incomplete.empty:
         return {"status": "all_done", "plan": {}}
 
-    today = date.today()
+    now_dt = datetime.now()
+    today = now_dt.date()
+
+    # Dynamic current time calculation (rounded to next 5-minute block)
+    now_mins = now_dt.hour * 60 + now_dt.minute
+    if now_mins % 5 != 0:
+        now_mins += (5 - (now_mins % 5))
+
     task_queue = []
 
     for _, row in incomplete.iterrows():
@@ -771,11 +775,17 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         day_name = DAYS_OF_WEEK[day_date.weekday()]
 
         if day_date.weekday() in (5, 6):  # Weekend
-            DAY_START_MINS = 10 * 60
+            default_start_mins = 10 * 60
             DAY_END_MINS = 20 * 60
         else:  # Weekday
-            DAY_START_MINS = 15 * 60 + 30
+            default_start_mins = 15 * 60 + 30
             DAY_END_MINS = 21 * 60
+
+        # For TODAY (i == 0), start dynamically from current time if later than default opening
+        if i == 0:
+            DAY_START_MINS = max(default_start_mins, now_mins)
+        else:
+            DAY_START_MINS = default_start_mins
 
         busy_intervals = []
         day_events = [s for s in schedule if s.get("day") == day_name]
