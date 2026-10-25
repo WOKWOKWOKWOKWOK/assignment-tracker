@@ -1,10 +1,10 @@
 """
-Assignment Tracker — Executive Clean Edition
+Assignment Tracker — Executive Edition (HTML Rendering Fix)
 Fixes:
-- Card Height & Alignment: Est time sits horizontally beside Due Date to eliminate bottom squishing
-- Removed cluttered/childish emojis for a sleek, high-end professional dark theme
-- Preserved precise Checkbox <-> Status Dropdown bidirectional state sync
-- Dynamic subject badges, real-time JS progress toast, multi-tenant Neon PostgreSQL
+- HTML Code Block Bug: Converted indented HTML blocks to single-line string formatting
+  so Streamlit never renders raw HTML tags or closing </div> wrappers in code boxes.
+- Compact Metadata Layout: Due Date, Est duration, and Priority pills stay cleanly aligned.
+- Complete Checkbox <-> Dropdown state synchronization.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def get_local_now() -> datetime:
 
 
 # -----------------------
-# Streamlit Page Config & Executive CSS Overrides
+# Streamlit Page Config & Professional CSS Overrides
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
@@ -89,12 +89,12 @@ st.markdown(
         border-color: #6366f1 !important;
     }
 
-    /* Card Containers with Generous Padding */
+    /* Card Containers */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
         border-radius: 10px !important;
-        padding: 18px 18px 18px 18px !important;
+        padding: 16px 18px 18px 18px !important;
         margin-bottom: 16px !important;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
         transition: border-color 0.2s ease;
@@ -638,7 +638,7 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Real-Time Callbacks (Fixed Dropdown State Sync)
+# Real-Time Callbacks (Fixed Sync for Dropdown & Checkbox)
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any], chk_key: str, sel_key: str):
     chk_val = st.session_state.get(chk_key, False)
@@ -903,12 +903,10 @@ def render_terminal_auth_page():
 
     with c_center:
         st.markdown(
-            """
-            <div style="background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 32px 28px; text-align: center; margin-bottom: 20px;">
-                <div style="font-size: 1.8rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">Assignment Tracker</div>
-                <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">Simsbury High School Portal</div>
-            </div>
-            """,
+            "<div style='background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 32px 28px; text-align: center; margin-bottom: 20px;'>"
+            "<div style='font-size: 1.8rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;'>Assignment Tracker</div>"
+            "<div style='font-size: 0.85rem; color: #64748b; margin-top: 4px;'>Simsbury High School Portal</div>"
+            "</div>",
             unsafe_allow_html=True,
         )
 
@@ -957,7 +955,7 @@ def render_terminal_auth_page():
 
 
 # -----------------------
-# Grid Renderer Component (In-line Metadata to Eliminate Squishing)
+# Grid Renderer Component (In-line Strings to Prevent HTML Code-Block Leaks)
 # -----------------------
 def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
     if df_grid.empty:
@@ -992,7 +990,7 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                     prio_cls = f"prio-{prio_label.lower()}"
                     row_dict = row.to_dict()
 
-                    # Top Toolbar: Checkbox, Course Badge, Edit, Status
+                    # Top Row: Checkbox, Course Badge, Edit Button, Status Selector
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.8, 1.1, 2.3])
 
                     with c_top1:
@@ -1024,32 +1022,26 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                             args=(aid, row_dict, sel_key, chk_key)
                         )
 
-                    # Title & Type
+                    # Title & Type Headers
                     st.markdown(f"<div style='font-size:1.15rem; font-weight:700; color:#f8fafc; margin-top:10px;'>{title}</div>", unsafe_allow_html=True)
                     st.markdown(f"<div style='color:#64748b; font-size:0.8rem; margin-top:2px; margin-bottom:12px;'>{atype}</div>", unsafe_allow_html=True)
 
                     eta = str(row.get("eta") or "").strip()
                     notes = str(row.get("notes") or "").strip()
 
-                    # Clean Horizontal Metadata Row (Due Date + Est on left, Priority Badge on right)
-                    eta_snippet = f"<span style='color:#64748b; margin-left:6px;'>• Est: {eta}</span>" if eta else ""
-                    
-                    st.markdown(
-                        f"""
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px solid #1e293b;">
-                            <div style="font-size: 0.78rem; color: #94a3b8; display: flex; align-items: center;">
-                                <span>Due {due_text} <span style="color: #64748b;">({days_text})</span></span>
-                                {eta_snippet}
-                            </div>
-                            <div class="{prio_cls}">Priority: {prio_label}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
+                    # In-line Flexbox HTML Row (No multiline indentation = No raw code leaks)
+                    eta_snippet = f" &bull; Est: {eta}" if eta else ""
+                    bot_html = (
+                        f"<div style='display:flex; align-items:center; justify-content:space-between; margin-top:10px; padding-top:10px; border-top:1px solid #1e293b;'>"
+                        f"<div style='font-size:0.78rem; color:#94a3b8;'>Due {due_text} <span style='color:#64748b;'>({days_text})</span>{eta_snippet}</div>"
+                        f"<div class='{prio_cls}'>Priority: {prio_label}</div>"
+                        f"</div>"
                     )
+                    st.markdown(bot_html, unsafe_allow_html=True)
 
                     if notes:
                         note_preview = notes if len(notes) <= 90 else notes[:87] + "..."
-                        st.markdown(f"<div style='font-size: 0.75rem; color: #64748b; margin-top: 6px;'>Note: {note_preview}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='font-size:0.75rem; color:#64748b; margin-top:6px;'>Note: {note_preview}</div>", unsafe_allow_html=True)
 
 
 # -----------------------
@@ -1266,12 +1258,7 @@ col_header_left, col_header_right = st.columns([2, 3])
 
 with col_header_left:
     st.markdown(
-        f"""
-        <div>
-            <div class="app-title">Assignment Tracker</div>
-            <div class="app-subtitle">{email}</div>
-        </div>
-        """,
+        f"<div style='margin-bottom:4px;'><div class='app-title'>Assignment Tracker</div><div class='app-subtitle'>{email}</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -1388,12 +1375,10 @@ with tab_schedule:
                 u_col1, u_col2 = st.columns([4.2, 1])
                 with u_col1:
                     st.markdown(
-                        f"""
-                        <div class="undo-toast-box">
-                            <span style="font-size: 0.85rem; color: #f8fafc;">Finished <b>{undo_state['title']}</b> for today</span>
-                            <div class="undo-progress-bar" style="animation-duration: {remaining_sec}s;"></div>
-                        </div>
-                        """,
+                        f"<div class='undo-toast-box'>"
+                        f"<span style='font-size: 0.85rem; color: #f8fafc;'>Finished <b>{undo_state['title']}</b> for today</span>"
+                        f"<div class='undo-progress-bar' style='animation-duration: {remaining_sec}s;'></div>"
+                        f"</div>",
                         unsafe_allow_html=True,
                     )
                 with u_col2:
