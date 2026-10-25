@@ -5,6 +5,7 @@ Features:
 - Multi-tenant user isolation for assignments, courses, and weekly commitments
 - Low / Medium / High simplified priority system
 - Smart duration parser handling ranges (e.g., '10-20 mins/day' -> 15 mins)
+- Strict Pre-Due-Date AI Scheduling: All tasks & test prep finish BEFORE due date
 - Recurring Daily AI Study Planning for Tests & Quizzes with clear "Study for..." labeling
 - Explicit 12-Hour AM/PM Commitment Time Inputs
 - Toggleable exact time-slot display vs. simple bullet view
@@ -732,12 +733,12 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
     for _, row in incomplete.iterrows():
         due_d = parse_date_iso_or_empty(row.get("due_date")) or (today + timedelta(days=7))
         days_until = (due_d - today).days
-        if days_until < 1:
-            days_until = 1
+        if days_until < 0:
+            days_until = 0
 
         prio_label = priority_to_label(row.get("priority"))
         importance_num = priority_to_int(prio_label)
-        urgency_multiplier = 10.0 / days_until
+        urgency_multiplier = 10.0 / max(1, days_until)
         ai_score = importance_num * urgency_multiplier
 
         eta_mins = parse_eta_to_mins(row.get("eta"))
@@ -805,7 +806,10 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         remaining_tasks = []
 
         for t in task_queue:
-            if t["days_until"] >= i and day_scheduled_mins < max_daily_mins:
+            # Enforce pre-due-date buffer: Must complete task BEFORE due date day (unless due today)
+            target_max_day = max(0, t["days_until"] - 1) if t["days_until"] > 0 else 0
+
+            if i <= target_max_day and day_scheduled_mins < max_daily_mins:
                 scheduled = False
                 needed = t["eta_mins"]
 
@@ -834,7 +838,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
                 if not scheduled:
                     remaining_tasks.append(t)
                 elif t["is_study"]:
-                    # Keep study/prep tasks in queue so they repeat daily until due date
+                    # Keep study prep in queue to repeat daily until the day BEFORE test day
                     remaining_tasks.append(t)
             else:
                 remaining_tasks.append(t)
