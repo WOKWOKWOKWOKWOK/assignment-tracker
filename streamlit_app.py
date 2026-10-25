@@ -1,7 +1,8 @@
 """
 Assignment Tracker — Fully Migrated to Neon PostgreSQL with Real-Time AI Scheduler
 Features:
-- Real-Time Clock Integration: Today's schedule starts dynamically from the current minute
+- Fixed Local Timezone (America/New_York): Prevents Streamlit Cloud UTC offset bugs
+- Real-Time Clock Integration: Today's schedule starts dynamically from your actual local time
 - Pre-Due-Date AI Scheduling: All tasks & test prep finish BEFORE due date
 - Smart duration parser handling ranges (e.g., '10-20 mins/day' -> 15 mins)
 - Recurring Daily AI Study Planning for Tests & Quizzes with clear "Study for..." labeling
@@ -21,6 +22,17 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
+
+
+# Timezone helper for Simsbury/Eastern Time
+def get_local_now() -> datetime:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        # Fallback to EDT offset (UTC-4) if tzdata is missing
+        return datetime.utcnow() - timedelta(hours=4)
+
 
 # -----------------------
 # Streamlit Page Config & CSS Overrides
@@ -417,7 +429,7 @@ def sign_up_user(email: str, password: str) -> Dict[str, Any]:
     email_clean = email.lower().strip()
     user_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, email_clean))
     pw_hash = _hash_pw(password.strip())
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = get_local_now().isoformat()
 
     sql_check = text("SELECT id FROM users WHERE email = :email")
     sql_insert = text("""
@@ -498,7 +510,7 @@ def _write_courses_file(user_id: str, courses: List[str]) -> None:
             "id": cfg_id,
             "user_id": user_id,
             "notes": json.dumps(courses),
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": get_local_now().isoformat()
         })
 
 
@@ -531,7 +543,7 @@ def _write_schedule_file(user_id: str, schedule: List[Dict[str, Any]]) -> None:
             "id": cfg_id,
             "user_id": user_id,
             "notes": json.dumps(schedule),
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": get_local_now().isoformat()
         })
 
 
@@ -608,7 +620,7 @@ def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
                 "atype": str(row.get("atype", "Homework")),
                 "eta": str(row.get("eta", "")).strip(),
                 "notes": packed,
-                "created_at": str(row.get("created_at") or datetime.utcnow().isoformat())
+                "created_at": str(row.get("created_at") or get_local_now().isoformat())
             })
 
     invalidate_cache()
@@ -697,14 +709,14 @@ def parse_time_str(t_str: str) -> Optional[time]:
 
 def format_mdy(d: Optional[date]) -> str:
     if not d:
-        return datetime.today().strftime("%m/%d/%Y")
+        return get_local_now().date().strftime("%m/%d/%Y")
     return d.strftime("%m/%d/%Y")
 
 
 def days_left(d: Optional[date]) -> Tuple[str, int]:
     if not d:
         return ("0d left", 0)
-    today = date.today()
+    today = get_local_now().date()
     delta = (d - today).days
     if delta < 0:
         return (f"{delta}d left", delta)
@@ -724,11 +736,11 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
     if incomplete.empty:
         return {"status": "all_done", "plan": {}}
 
-    now_dt = datetime.now()
-    today = now_dt.date()
+    now_local = get_local_now()
+    today = now_local.date()
 
-    # Dynamic current time calculation (rounded to next 5-minute block)
-    now_mins = now_dt.hour * 60 + now_dt.minute
+    # Dynamic current time calculation in local Eastern Time (rounded to next 5-min block)
+    now_mins = now_local.hour * 60 + now_local.minute
     if now_mins % 5 != 0:
         now_mins += (5 - (now_mins % 5))
 
@@ -781,7 +793,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             default_start_mins = 15 * 60 + 30
             DAY_END_MINS = 21 * 60
 
-        # For TODAY (i == 0), start dynamically from current time if later than default opening
+        # For TODAY (i == 0), start dynamically from current Eastern local time
         if i == 0:
             DAY_START_MINS = max(default_start_mins, now_mins)
         else:
@@ -1052,7 +1064,7 @@ def show_add_assignment_dialog(user_id: str):
         course_choice = st.selectbox("Subject / Course", options=[""] + courses, index=0, key="add_course_choice")
         course_free = st.text_input("Or type a new course name", value="", key="add_course_free")
         status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
-        due = st.date_input("Due Date (MM/DD/YYYY)", value=date.today(), key="add_due")
+        due = st.date_input("Due Date (MM/DD/YYYY)", value=get_local_now().date(), key="add_due")
         importance_label = st.selectbox("Priority Level", PRIORITY_OPTIONS, index=1, key="add_prio_select")
         atype = st.selectbox("Assignment Type", TYPE_OPTIONS, index=0, key="add_atype")
         eta = st.text_input("Estimated Duration (e.g., 15 mins, 1 hour)", key="add_eta")
@@ -1071,7 +1083,7 @@ def show_add_assignment_dialog(user_id: str):
                 "priority": priority_to_int(importance_label),
                 "atype": atype,
                 "eta": eta.strip(),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": get_local_now().isoformat(),
                 "notes": notes.strip(),
                 "prev_status": status if status != "Done" else "Not Started",
             }
@@ -1113,7 +1125,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
             index=(STATUS_OPTIONS.index(assignment_record.get("status")) if assignment_record.get("status") in STATUS_OPTIONS else 0),
             key=f"edit_status_{aid}",
         )
-        due_parsed = parse_date_iso_or_empty(assignment_record.get("due_date")) or date.today()
+        due_parsed = parse_date_iso_or_empty(assignment_record.get("due_date")) or get_local_now().date()
         due = st.date_input("Due Date (MM/DD/YYYY)", value=due_parsed, key=f"edit_due_{aid}")
         curr_prio_label = priority_to_label(assignment_record.get("priority"))
         importance_label = st.selectbox(
@@ -1150,7 +1162,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
                 "atype": atype,
                 "eta": eta.strip(),
                 "notes": notes.strip(),
-                "created_at": assignment_record.get("created_at") or datetime.utcnow().isoformat(),
+                "created_at": assignment_record.get("created_at") or get_local_now().isoformat(),
                 "prev_status": status if status != "Done" else assignment_record.get("prev_status", "Not Started"),
             }
             upsert_assignments([updated])
@@ -1270,7 +1282,7 @@ with col_header_right:
             unsafe_allow_html=True,
         )
 
-today_str = datetime.today().strftime("%A, %B %d, %Y")
+today_str = get_local_now().strftime("%A, %B %d, %Y")
 st.markdown(
     f'<div class="calendar-banner-box">📅 Today\'s Date: {today_str}</div>',
     unsafe_allow_html=True,
