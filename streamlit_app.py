@@ -1,8 +1,8 @@
 """
 Assignment Tracker — Fully Migrated to Neon PostgreSQL with Real-Time AI Scheduler
 Features:
-- Fixed Local Timezone (America/New_York): Prevents Streamlit Cloud UTC offset bugs
-- Real-Time Clock Integration: Today's schedule starts dynamically from your actual local time
+- Daily Task Completion Checkbox with 20-Second Transient Undo Timer
+- Real-Time Clock Integration (America/New_York local time lock)
 - Pre-Due-Date AI Scheduling: All tasks & test prep finish BEFORE due date
 - Smart duration parser handling ranges (e.g., '10-20 mins/day' -> 15 mins)
 - Recurring Daily AI Study Planning for Tests & Quizzes with clear "Study for..." labeling
@@ -30,7 +30,6 @@ def get_local_now() -> datetime:
         from zoneinfo import ZoneInfo
         return datetime.now(ZoneInfo("America/New_York"))
     except Exception:
-        # Fallback to EDT offset (UTC-4) if tzdata is missing
         return datetime.utcnow() - timedelta(hours=4)
 
 
@@ -467,7 +466,7 @@ def sign_in_user(email: str, password: str) -> Dict[str, Any]:
 
 
 def sign_out_user() -> None:
-    for key in ["user", "df_cached", "_ai_plan_result"]:
+    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_undo_slot_state"]:
         if key in st.session_state:
             del st.session_state[key]
     safe_rerun()
@@ -739,7 +738,6 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
     now_local = get_local_now()
     today = now_local.date()
 
-    # Dynamic current time calculation in local Eastern Time (rounded to next 5-min block)
     now_mins = now_local.hour * 60 + now_local.minute
     if now_mins % 5 != 0:
         now_mins += (5 - (now_mins % 5))
@@ -793,7 +791,6 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             default_start_mins = 15 * 60 + 30
             DAY_END_MINS = 21 * 60
 
-        # For TODAY (i == 0), start dynamically from current Eastern local time
         if i == 0:
             DAY_START_MINS = max(default_start_mins, now_mins)
         else:
@@ -828,7 +825,6 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         remaining_tasks = []
 
         for t in task_queue:
-            # Enforce pre-due-date buffer: Must complete task BEFORE due date day (unless due today)
             target_max_day = max(0, t["days_until"] - 1) if t["days_until"] > 0 else 0
 
             if i <= target_max_day and day_scheduled_mins < max_daily_mins:
@@ -845,6 +841,8 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
                         end_str = time(end_m // 60, end_m % 60).strftime("%I:%M %p").lstrip("0")
 
                         plan[day_name]["slots"].append({
+                            "slot_id": f"{t['id']}_{day_date.isoformat()}",
+                            "task_id": t["id"],
                             "time": f"{start_str} - {end_str}",
                             "title": t["title"],
                             "course": t["course"],
@@ -860,7 +858,6 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
                 if not scheduled:
                     remaining_tasks.append(t)
                 elif t["is_study"]:
-                    # Keep study prep in queue to repeat daily until the day BEFORE test day
                     remaining_tasks.append(t)
             else:
                 remaining_tasks.append(t)
@@ -1225,6 +1222,8 @@ if "_open_manage_courses" not in st.session_state:
     st.session_state["_open_manage_courses"] = False
 if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
+if "_completed_daily_slots" not in st.session_state:
+    st.session_state["_completed_daily_slots"] = set()
 
 if st.session_state.get("_show_welcome_courses_modal", False):
     show_welcome_courses_dialog(user_id)
@@ -1369,6 +1368,22 @@ with tab_schedule:
         st.markdown("### 🤖 AI Daily Action Plan")
         st.caption("Schedules study tasks across available days based on due dates, priority, and busy blocks.")
 
+        # Undo Notification Bar (20-Second Transient Timer)
+        undo_state = st.session_state.get("_undo_slot_state")
+        if undo_state:
+            elapsed = (get_local_now() - undo_state["time"]).total_seconds()
+            if elapsed <= 20:
+                u_col1, u_col2 = st.columns([4, 1])
+                with u_col1:
+                    st.info(f"✅ Finished **{undo_state['title']}** for today! ({int(20 - elapsed)}s remaining to undo)")
+                with u_col2:
+                    if st.button("↩️ Undo", key="btn_undo_slot"):
+                        st.session_state["_completed_daily_slots"].discard(undo_state["slot_id"])
+                        del st.session_state["_undo_slot_state"]
+                        safe_rerun()
+            else:
+                del st.session_state["_undo_slot_state"]
+
         ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1.5, 1.2, 1.3])
 
         with ctrl_col1:
@@ -1405,6 +1420,8 @@ with tab_schedule:
         elif status == "all_done":
             st.success("🎉 All assignments are marked as 'Done'! Nothing to schedule.")
         elif status == "success" and plan:
+            completed_set = st.session_state["_completed_daily_slots"]
+
             for day_name, day_data in plan.items():
                 if not isinstance(day_data, dict):
                     st.session_state["_ai_plan_result"] = generate_ai_study_plan(
@@ -1419,20 +1436,38 @@ with tab_schedule:
                 if busy_list:
                     st.caption("Busy: " + ", ".join([f"🚫 {b}" for b in busy_list]))
 
-                study_slots = day_data.get("slots", [])
-                if study_slots:
-                    for s in study_slots:
+                raw_slots = day_data.get("slots", [])
+                # Filter out slots marked as done for today
+                visible_slots = [s for s in raw_slots if s.get("slot_id") not in completed_set]
+
+                if visible_slots:
+                    for s in visible_slots:
+                        s_id = s.get("slot_id")
                         slot_prio = s.get("priority", priority_to_label(s.get("importance")))
-                        if show_time_slots:
-                            st.markdown(
-                                f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Priority: **{slot_prio}** ({s['eta_mins']} mins)",
-                                unsafe_allow_html=True
-                            )
-                        else:
-                            st.markdown(
-                                f"▫️ **{s['title']}** (`{s['course']}`) — Priority: **{slot_prio}** ({s['eta_mins']} mins)"
-                            )
+
+                        c_chk, c_text = st.columns([0.4, 7.6])
+                        with c_chk:
+                            chk_key = f"chk_day_done_{s_id}"
+                            if st.checkbox("Done Today", key=chk_key, label_visibility="collapsed"):
+                                st.session_state["_completed_daily_slots"].add(s_id)
+                                st.session_state["_undo_slot_state"] = {
+                                    "slot_id": s_id,
+                                    "title": s["title"],
+                                    "time": get_local_now()
+                                }
+                                safe_rerun()
+
+                        with c_text:
+                            if show_time_slots:
+                                st.markdown(
+                                    f"<span class='time-slot-badge'>⏰ {s['time']}</span> — **{s['title']}** (`{s['course']}`) | Priority: **{slot_prio}** ({s['eta_mins']} mins)",
+                                    unsafe_allow_html=True
+                                )
+                            else:
+                                st.markdown(
+                                    f"▫️ **{s['title']}** (`{s['course']}`) — Priority: **{slot_prio}** ({s['eta_mins']} mins)"
+                                )
                 else:
-                    st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks assigned for this day. Free time!</span>", unsafe_allow_html=True)
+                    st.markdown("<span style='color:#64748b; font-size:0.85rem;'>No study tasks remaining for this day. Free time!</span>", unsafe_allow_html=True)
 
                 st.markdown('</div>', unsafe_allow_html=True)
