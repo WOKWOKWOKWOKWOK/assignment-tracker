@@ -5,8 +5,8 @@ Features:
 - Multi-tenant user isolation for assignments, courses, and weekly commitments
 - Low / Medium / High simplified priority system
 - Smart duration parser handling ranges (e.g., '10-20 mins/day' -> 15 mins)
+- Recurring Daily AI Study Planning for Tests & Quizzes with clear "Study for..." labeling
 - Explicit 12-Hour AM/PM Commitment Time Inputs
-- Balanced AI Study Planner: Spreads tasks across days to prevent overload
 - Toggleable exact time-slot display vs. simple bullet view
 - User authentication & automatic schema initialization
 """
@@ -368,6 +368,22 @@ def parse_eta_to_mins(eta_raw: Any) -> int:
     return max(10, avg_val)
 
 
+def is_study_task(atype: str, title: str, notes: str) -> bool:
+    """Checks if an entry actively involves studying for tests/quizzes."""
+    content = f"{atype} {title} {notes}".lower()
+    keywords = ["study", "studying", "review", "prep", "prepping", "practice", "flashcard", "quiz", "test", "exam"]
+    return any(kw in content for kw in keywords)
+
+
+def format_study_display_title(raw_title: str) -> str:
+    """Ensures test study tasks clearly say 'Study for [Title]' instead of implying a test every day."""
+    t_lower = raw_title.lower()
+    study_words = ["study", "review", "prep", "practice", "flashcard"]
+    if any(w in t_lower for w in study_words):
+        return raw_title
+    return f"Study for {raw_title}"
+
+
 def get_courses_config_id(user_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_courses_config_{user_id}"))
 
@@ -725,17 +741,24 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         ai_score = importance_num * urgency_multiplier
 
         eta_mins = parse_eta_to_mins(row.get("eta"))
+        atype = str(row.get("atype") or "Homework")
+        title = str(row.get("title") or "Untitled")
+        notes = str(row.get("notes") or "")
+
+        is_study = is_study_task(atype, title, notes)
+        display_title = format_study_display_title(title) if is_study else title
 
         task_queue.append({
             "id": row.get("id"),
-            "title": row.get("title") or "Untitled",
+            "title": display_title,
             "course": row.get("course") or "GENERAL",
-            "atype": row.get("atype") or "Homework",
+            "atype": atype,
             "due_date": due_d.strftime("%a %b %d"),
             "priority": prio_label,
             "score": ai_score,
             "eta_mins": eta_mins,
-            "days_until": days_until
+            "days_until": days_until,
+            "is_study": is_study
         })
 
     task_queue.sort(key=lambda x: x["score"], reverse=True)
@@ -809,6 +832,9 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
                         break
 
                 if not scheduled:
+                    remaining_tasks.append(t)
+                elif t["is_study"]:
+                    # Keep study/prep tasks in queue so they repeat daily until due date
                     remaining_tasks.append(t)
             else:
                 remaining_tasks.append(t)
