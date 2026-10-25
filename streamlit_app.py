@@ -1,10 +1,10 @@
 """
-Assignment Tracker — Executive Edition (HTML Rendering Fix)
+Assignment Tracker — Executive Edition (Bottom Margin & Padding Fix)
 Fixes:
-- HTML Code Block Bug: Converted indented HTML blocks to single-line string formatting
-  so Streamlit never renders raw HTML tags or closing </div> wrappers in code boxes.
-- Compact Metadata Layout: Due Date, Est duration, and Priority pills stay cleanly aligned.
-- Complete Checkbox <-> Dropdown state synchronization.
+- Card Bottom Squishing: Applied direct margin-bottom to bottom metadata container
+  and CSS container padding to give clean breathing room above the card border.
+- Clean Inline HTML rendering: Prevents raw code box leaks.
+- Full Checkbox <-> Dropdown state synchronization.
 """
 
 from __future__ import annotations
@@ -89,15 +89,19 @@ st.markdown(
         border-color: #6366f1 !important;
     }
 
-    /* Card Containers */
+    /* Card Containers with Guaranteed Bottom Spacing */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
         border-radius: 10px !important;
-        padding: 16px 18px 18px 18px !important;
+        padding: 18px 18px 22px 18px !important;
         margin-bottom: 16px !important;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
         transition: border-color 0.2s ease;
+    }
+
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+        padding-bottom: 8px !important;
     }
 
     div[data-testid="stVerticalBlockBorderWrapper"]:hover {
@@ -955,7 +959,7 @@ def render_terminal_auth_page():
 
 
 # -----------------------
-# Grid Renderer Component (In-line Strings to Prevent HTML Code-Block Leaks)
+# Grid Renderer Component
 # -----------------------
 def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
     if df_grid.empty:
@@ -1029,10 +1033,10 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                     eta = str(row.get("eta") or "").strip()
                     notes = str(row.get("notes") or "").strip()
 
-                    # In-line Flexbox HTML Row (No multiline indentation = No raw code leaks)
+                    # In-line Flexbox HTML Row with explicit margin-bottom for clean bottom spacing
                     eta_snippet = f" &bull; Est: {eta}" if eta else ""
                     bot_html = (
-                        f"<div style='display:flex; align-items:center; justify-content:space-between; margin-top:10px; padding-top:10px; border-top:1px solid #1e293b;'>"
+                        f"<div style='display:flex; align-items:center; justify-content:space-between; margin-top:10px; margin-bottom:12px; padding-top:10px; border-top:1px solid #1e293b;'>"
                         f"<div style='font-size:0.78rem; color:#94a3b8;'>Due {due_text} <span style='color:#64748b;'>({days_text})</span>{eta_snippet}</div>"
                         f"<div class='{prio_cls}'>Priority: {prio_label}</div>"
                         f"</div>"
@@ -1041,7 +1045,7 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
 
                     if notes:
                         note_preview = notes if len(notes) <= 90 else notes[:87] + "..."
-                        st.markdown(f"<div style='font-size:0.75rem; color:#64748b; margin-top:6px;'>Note: {note_preview}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='font-size:0.75rem; color:#64748b; margin-top:4px; margin-bottom:8px;'>Note: {note_preview}</div>", unsafe_allow_html=True)
 
 
 # -----------------------
