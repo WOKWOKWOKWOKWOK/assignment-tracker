@@ -41,8 +41,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# --- CORRECT PWA MANIFEST INJECTION ---
-# Split into tiny parts so your screen wrapping doesn't cut the links off
+# --- CORRECT PWA MANIFEST INJECTION WITH IOS BEZEL REMOVAL ---
 base_raw_url = (
     "https://"
     "://githubusercontent.com"
@@ -65,20 +64,41 @@ pwa_injection = f"""
     appleIcon.href = '{base_raw_url}ios/180.png';
     parent.document.head.appendChild(appleIcon);
 
-    // 3. FIX THE WHITE BEZEL: Force iOS status bar to blend into the app canvas
-    const metaMetaApple = parent.document.createElement('meta');
-    metaMetaApple.name = 'apple-mobile-web-app-capable';
-    metaMetaApple.content = 'yes';
-    parent.document.head.appendChild(metaMetaApple);
+    // 3. Force the parent document viewport layout parameters to cover notched screens
+    let viewport = parent.document.querySelector('meta[name="viewport"]');
+    if (viewport) {{
+        viewport.content = "width=device-width, initial-scale=1, viewport-fit=cover";
+    }} else {{
+        viewport = parent.document.createElement('meta');
+        viewport.name = "viewport";
+        viewport.content = "width=device-width, initial-scale=1, viewport-fit=cover";
+        parent.document.head.appendChild(viewport);
+    }}
 
+    // 4. Force iOS PWA execution to load standalone
+    const metaAppleCapable = parent.document.createElement('meta');
+    metaAppleCapable.name = 'apple-mobile-web-app-capable';
+    metaAppleCapable.content = 'yes';
+    parent.document.head.appendChild(metaAppleCapable);
+
+    // 5. Tell iOS to use transparent status overlays
     const metaStatusBar = parent.document.createElement('meta');
     metaStatusBar.name = 'apple-mobile-web-app-status-bar-style';
     metaStatusBar.content = 'black-translucent';
     parent.document.head.appendChild(metaStatusBar);
+
+    // 6. Force the topmost base background styles to match your dark layout #070a12
+    const styleFix = parent.document.createElement('style');
+    styleFix.innerHTML = `
+        html, body, #root, iframe, .stApp {{
+            background-color: #070a12 !important;
+        }}
+    `;
+    parent.document.head.appendChild(styleFix);
 </script>
 """
 components.html(pwa_injection, height=0, width=0)
-# --------------------------------------
+# -------------------------------------------------------------
 
 st.markdown(
     """
