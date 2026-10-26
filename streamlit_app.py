@@ -53,20 +53,32 @@ base_raw_url = (
 
 pwa_injection = f"""
 <script>
+    // 1. Inject the main web manifest file
     const manifestLink = parent.document.createElement('link');
     manifestLink.rel = 'manifest';
     manifestLink.href = '{base_raw_url}manifest.json';
     parent.document.head.appendChild(manifestLink);
 
+    // 2. Inject the main high-res iOS home screen icon
     const appleIcon = parent.document.createElement('link');
     appleIcon.rel = 'apple-touch-icon';
     appleIcon.href = '{base_raw_url}ios/180.png';
     parent.document.head.appendChild(appleIcon);
+
+    // 3. FIX THE WHITE BEZEL: Force iOS status bar to blend into the app canvas
+    const metaMetaApple = parent.document.createElement('meta');
+    metaMetaApple.name = 'apple-mobile-web-app-capable';
+    metaMetaApple.content = 'yes';
+    parent.document.head.appendChild(metaMetaApple);
+
+    const metaStatusBar = parent.document.createElement('meta');
+    metaStatusBar.name = 'apple-mobile-web-app-status-bar-style';
+    metaStatusBar.content = 'black-translucent';
+    parent.document.head.appendChild(metaStatusBar);
 </script>
 """
 components.html(pwa_injection, height=0, width=0)
 # --------------------------------------
-
 
 st.markdown(
     """
