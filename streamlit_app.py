@@ -41,6 +41,42 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# -----------------------
+# Streamlit Page Config & Professional CSS Overrides
+# -----------------------
+st.set_page_config(
+    page_title="Assignment Tracker",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# --- ADD THIS PWA MANIFEST INJECTION BLOCK HERE ---
+pwa_injection = """
+<script>
+    // Inject PWA web manifest file link to the topmost window head element
+    const manifestLink = parent.document.createElement('link');
+    manifestLink.rel = 'manifest';
+    // REPLACE placeholder with your actual raw GitHub link path to your manifest.json file
+    manifestLink.href = 'https://githubusercontent.com';
+    parent.document.head.appendChild(manifestLink);
+
+    // Inject Apple iOS Web App Icon Meta Tags
+    const appleIcon = parent.document.createElement('link');
+    appleIcon.rel = 'apple-touch-icon';
+    // REPLACE placeholder with your actual raw GitHub link path to your 180x180 iOS icon
+    appleIcon.href = 'https://githubusercontent.com';
+    parent.document.head.appendChild(appleIcon);
+</script>
+"""
+components.html(pwa_injection, height=0, width=0)
+# --------------------------------------------------
+
+st.markdown(
+    """
+    <style>
+...
+
 st.markdown(
     """
     <style>
