@@ -51,31 +51,43 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# --- ADD THIS PWA MANIFEST INJECTION BLOCK HERE ---
+# --- CORRECT PWA MANIFEST INJECTION ---
 pwa_injection = """
 <script>
-    // Inject PWA web manifest file link to the topmost window head element
     const manifestLink = parent.document.createElement('link');
     manifestLink.rel = 'manifest';
-    // REPLACE placeholder with your actual raw GitHub link path to your manifest.json file
     manifestLink.href = 'https://githubusercontent.com';
     parent.document.head.appendChild(manifestLink);
 
-    // Inject Apple iOS Web App Icon Meta Tags
     const appleIcon = parent.document.createElement('link');
     appleIcon.rel = 'apple-touch-icon';
-    // REPLACE placeholder with your actual raw GitHub link path to your 180x180 iOS icon
     appleIcon.href = 'https://githubusercontent.com';
     parent.document.head.appendChild(appleIcon);
 </script>
 """
 components.html(pwa_injection, height=0, width=0)
-# --------------------------------------------------
+# --------------------------------------
 
 st.markdown(
     """
     <style>
-...
+    @import url('https://googleapis.com');
+
+    /* Canvas & Global Typography */
+    html, body, .stApp {
+        background-color: #070a12 !important;
+        color: #f1f5f9 !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+
+    .main .block-container {
+        padding-top: 1.2rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 1420px;
+    }
+    """,
+    unsafe_allow_html=True,
+)
 
 st.markdown(
     """
