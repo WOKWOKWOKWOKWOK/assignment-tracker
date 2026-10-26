@@ -41,16 +41,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# -----------------------
-# Streamlit Page Config & Professional CSS Overrides
-# -----------------------
-st.set_page_config(
-    page_title="Assignment Tracker",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-
 # --- CORRECT PWA MANIFEST INJECTION ---
 pwa_injection = """
 <script>
