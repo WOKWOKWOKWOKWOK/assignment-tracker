@@ -1,10 +1,10 @@
 """
-Assignment Tracker — Executive Edition (Bottom Margin & Padding Fix)
+Assignment Tracker — Daily Recurring Scheduler Edition
 Fixes:
-- Card Bottom Squishing: Applied direct margin-bottom to bottom metadata container
-  and CSS container padding to give clean breathing room above the card border.
-- Clean Inline HTML rendering: Prevents raw code box leaks.
-- Full Checkbox <-> Dropdown state synchronization.
+- Per-Day / Daily Task Parsing: Detects '/day', 'per day', 'a day', 'daily', etc. in ETA or notes
+  and automatically re-queues the task across all available days leading up to the due date.
+- Dual Priority Modes: Support for Low/Medium/High, 1-10 slider, or Both.
+- Bottom Margin & Card Spacing: Clean layout rendering without HTML code box leaks.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def get_local_now() -> datetime:
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
-    page_icon="📚",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -89,19 +89,15 @@ st.markdown(
         border-color: #6366f1 !important;
     }
 
-    /* Card Containers with Guaranteed Bottom Spacing */
+    /* Card Containers */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0f172a !important;
         border: 1px solid #1e293b !important;
         border-radius: 10px !important;
-        padding: 18px 18px 22px 18px !important;
+        padding: 16px 18px 22px 18px !important;
         margin-bottom: 16px !important;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
         transition: border-color 0.2s ease;
-    }
-
-    div[data-testid="stVerticalBlockBorderWrapper"] > div {
-        padding-bottom: 8px !important;
     }
 
     div[data-testid="stVerticalBlockBorderWrapper"]:hover {
@@ -260,6 +256,7 @@ DEFAULT_DOMAIN = "@simsburyschools.net"
 STATUS_OPTIONS = ["Not Started", "In Progress", "Done"]
 TYPE_OPTIONS = ["Homework", "Essay", "Presentation", "Test & Quizzes", "Other"]
 PRIORITY_OPTIONS = ["Low", "Medium", "High"]
+PRIORITY_SYSTEM_MODES = ["Low / Medium / High", "1 to 10 Scale (Slider)", "Both Systems"]
 DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
@@ -364,9 +361,23 @@ def priority_to_label(val: Any) -> str:
     return "Medium"
 
 
-def priority_to_int(label: str) -> int:
+def priority_to_int(label_or_val: Any) -> int:
+    if isinstance(label_or_val, (int, float)):
+        return max(1, min(10, int(label_or_val)))
     mapping = {"Low": 2, "Medium": 5, "High": 9}
-    return mapping.get(label, 5)
+    return mapping.get(str(label_or_val).strip().title(), 5)
+
+
+def format_priority_display(val: Any, mode: str) -> str:
+    p_num = priority_to_int(val)
+    p_label = priority_to_label(p_num)
+
+    if mode == "1 to 10 Scale (Slider)":
+        return f"{p_num}/10"
+    elif mode == "Both Systems":
+        return f"{p_label} ({p_num}/10)"
+    else:
+        return p_label
 
 
 def parse_eta_to_mins(eta_raw: Any) -> int:
@@ -381,7 +392,7 @@ def parse_eta_to_mins(eta_raw: Any) -> int:
         return 30
 
     is_hours = "hr" in s or "hour" in s
-    avg_val = sum(nums) // len(nums)
+    avg_val = nums[0]
 
     if is_hours:
         return max(15, avg_val * 60)
@@ -392,6 +403,12 @@ def is_study_task(atype: str, title: str, notes: str) -> bool:
     content = f"{atype} {title} {notes}".lower()
     keywords = ["study", "studying", "review", "prep", "prepping", "practice", "flashcard", "quiz", "test", "exam"]
     return any(kw in content for kw in keywords)
+
+
+def is_daily_recurring_task(eta_raw: Any, title: str, notes: str) -> bool:
+    content = f"{str(eta_raw)} {title} {notes}".lower()
+    daily_keywords = ["/day", "per day", "a day", "daily", "every day", "each day", "per-day", "/ d"]
+    return any(kw in content for kw in daily_keywords)
 
 
 def format_study_display_title(raw_title: str) -> str:
@@ -408,6 +425,10 @@ def get_courses_config_id(user_id: str) -> str:
 
 def get_schedule_config_id(user_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_schedule_config_{user_id}"))
+
+
+def get_prio_config_id(user_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_prio_config_{user_id}"))
 
 
 def _pack_notes(notes_text: str, prev_status: str) -> str:
@@ -475,7 +496,7 @@ def sign_in_user(email: str, password: str) -> Dict[str, Any]:
 
 
 def sign_out_user() -> None:
-    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_undo_slot_state"]:
+    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_undo_slot_state", "user_prio_mode"]:
         if key in st.session_state:
             del st.session_state[key]
     safe_rerun()
@@ -555,11 +576,41 @@ def _write_schedule_file(user_id: str, schedule: List[Dict[str, Any]]) -> None:
         })
 
 
+def _read_prio_config(user_id: str) -> Optional[str]:
+    cfg_id = get_prio_config_id(user_id)
+    sql = text("SELECT notes FROM assignments WHERE id = :id AND user_id = :uid")
+    with engine.connect() as conn:
+        row = conn.execute(sql, {"id": cfg_id, "uid": user_id}).fetchone()
+        if row and row.notes:
+            mode_val = str(row.notes).strip()
+            if mode_val in PRIORITY_SYSTEM_MODES:
+                return mode_val
+    return None
+
+
+def _write_prio_config(user_id: str, mode: str) -> None:
+    if not user_id or mode not in PRIORITY_SYSTEM_MODES:
+        return
+    cfg_id = get_prio_config_id(user_id)
+    sql = text("""
+        INSERT INTO assignments (id, user_id, title, course, due_date, status, priority, atype, eta, notes, created_at)
+        VALUES (:id, :user_id, '__SYSTEM_PRIO_CONFIG__', 'CONFIG', '', 'Not Started', 0, 'Other', '', :notes, :created_at)
+        ON CONFLICT (id) DO UPDATE SET notes = EXCLUDED.notes, user_id = EXCLUDED.user_id;
+    """)
+    with engine.begin() as conn:
+        conn.execute(sql, {
+            "id": cfg_id,
+            "user_id": user_id,
+            "notes": mode,
+            "created_at": get_local_now().isoformat()
+        })
+
+
 def fetch_assignments(user_id: str) -> pd.DataFrame:
     sql = text("""
         SELECT * FROM assignments 
         WHERE user_id = :uid 
-          AND title NOT IN ('__SYSTEM_COURSES__', '__SYSTEM_SCHEDULE__')
+          AND title NOT IN ('__SYSTEM_COURSES__', '__SYSTEM_SCHEDULE__', '__SYSTEM_PRIO_CONFIG__')
     """)
     with engine.connect() as conn:
         df = pd.read_sql(sql, conn, params={"uid": user_id})
@@ -580,7 +631,7 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
             "course": str(r.get("course") or "GENERAL").strip().upper(),
             "due_date": str(r.get("due_date") or ""),
             "status": str(r.get("status") or "Not Started"),
-            "priority": priority_to_int(priority_to_label(r.get("priority"))),
+            "priority": priority_to_int(r.get("priority")),
             "atype": str(r.get("atype") or "Homework"),
             "eta": str(r.get("eta") or ""),
             "created_at": str(r.get("created_at") or ""),
@@ -624,7 +675,7 @@ def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
                 "course": str(row.get("course", "GENERAL")).strip().upper(),
                 "due_date": str(row.get("due_date") or ""),
                 "status": str(row.get("status", "Not Started")),
-                "priority": priority_to_int(priority_to_label(row.get("priority"))),
+                "priority": priority_to_int(row.get("priority")),
                 "atype": str(row.get("atype", "Homework")),
                 "eta": str(row.get("eta", "")).strip(),
                 "notes": packed,
@@ -642,7 +693,7 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Real-Time Callbacks (Fixed Sync for Dropdown & Checkbox)
+# Real-Time Callbacks
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any], chk_key: str, sel_key: str):
     chk_val = st.session_state.get(chk_key, False)
@@ -675,13 +726,6 @@ def on_status_change(aid: str, row_dict: Dict[str, Any], sel_key: str, chk_key: 
         st.session_state[chk_key] = (new_status == "Done")
         upsert_assignments([row_dict])
         safe_rerun()
-
-
-def on_priority_change(aid: str, row_dict: Dict[str, Any], widget_key: str):
-    new_prio_label = st.session_state.get(widget_key)
-    if new_prio_label:
-        row_dict["priority"] = priority_to_int(new_prio_label)
-        upsert_assignments([row_dict])
 
 
 def on_daily_slot_check(slot_key: str, task_title: str):
@@ -781,17 +825,21 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
         if days_until < 0:
             days_until = 0
 
-        prio_label = priority_to_label(row.get("priority"))
-        importance_num = priority_to_int(prio_label)
+        prio_val = priority_to_int(row.get("priority"))
+        prio_label = priority_to_label(prio_val)
         urgency_multiplier = 10.0 / max(1, days_until)
-        ai_score = importance_num * urgency_multiplier
+        ai_score = prio_val * urgency_multiplier
 
-        eta_mins = parse_eta_to_mins(row.get("eta"))
+        eta_raw = str(row.get("eta") or "")
+        eta_mins = parse_eta_to_mins(eta_raw)
         atype = str(row.get("atype") or "Homework")
         title = str(row.get("title") or "Untitled")
         notes = str(row.get("notes") or "")
 
         is_study = is_study_task(atype, title, notes)
+        is_daily = is_daily_recurring_task(eta_raw, title, notes)
+        repeat_daily = is_study or is_daily
+
         display_title = format_study_display_title(title) if is_study else title
 
         task_queue.append({
@@ -804,7 +852,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
             "score": ai_score,
             "eta_mins": eta_mins,
             "days_until": days_until,
-            "is_study": is_study
+            "repeat_daily": repeat_daily
         })
 
     task_queue.sort(key=lambda x: x["score"], reverse=True)
@@ -889,7 +937,7 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
 
                 if not scheduled:
                     remaining_tasks.append(t)
-                elif t["is_study"]:
+                elif t["repeat_daily"]:
                     remaining_tasks.append(t)
             else:
                 remaining_tasks.append(t)
@@ -953,6 +1001,8 @@ def render_terminal_auth_page():
                     invalidate_cache()
                     if not _read_courses_file(u_id):
                         st.session_state["_show_welcome_courses_modal"] = True
+                    if not _read_prio_config(u_id):
+                        st.session_state["_show_prio_config_modal"] = True
                     safe_rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)
@@ -961,7 +1011,7 @@ def render_terminal_auth_page():
 # -----------------------
 # Grid Renderer Component
 # -----------------------
-def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
+def render_assignment_grid(df_grid: pd.DataFrame, user_prio_mode: str, key_prefix: str = "reg_"):
     if df_grid.empty:
         st.markdown("<div style='padding:50px 0; text-align:center; color:#475569; font-size:0.9rem;'>No assignments in this view.</div>", unsafe_allow_html=True)
         return
@@ -990,8 +1040,10 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                     sel_key = f"{key_prefix}status_sel_{aid}"
 
                     status = st.session_state.get(sel_key) or row.get("status") or "Not Started"
-                    prio_label = priority_to_label(row.get("priority"))
+                    prio_num = priority_to_int(row.get("priority"))
+                    prio_label = priority_to_label(prio_num)
                     prio_cls = f"prio-{prio_label.lower()}"
+                    prio_display_str = format_priority_display(prio_num, user_prio_mode)
                     row_dict = row.to_dict()
 
                     # Top Row: Checkbox, Course Badge, Edit Button, Status Selector
@@ -1033,12 +1085,12 @@ def render_assignment_grid(df_grid: pd.DataFrame, key_prefix: str = "reg_"):
                     eta = str(row.get("eta") or "").strip()
                     notes = str(row.get("notes") or "").strip()
 
-                    # In-line Flexbox HTML Row with explicit margin-bottom for clean bottom spacing
+                    # Bottom Metadata Row: Due Date + Est on left, Dynamic Priority Display on right
                     eta_snippet = f" &bull; Est: {eta}" if eta else ""
                     bot_html = (
                         f"<div style='display:flex; align-items:center; justify-content:space-between; margin-top:10px; margin-bottom:12px; padding-top:10px; border-top:1px solid #1e293b;'>"
                         f"<div style='font-size:0.78rem; color:#94a3b8;'>Due {due_text} <span style='color:#64748b;'>({days_text})</span>{eta_snippet}</div>"
-                        f"<div class='{prio_cls}'>Priority: {prio_label}</div>"
+                        f"<div class='{prio_cls}'>Priority: {prio_display_str}</div>"
                         f"</div>"
                     )
                     st.markdown(bot_html, unsafe_allow_html=True)
@@ -1068,8 +1120,29 @@ def show_welcome_courses_dialog(user_id: str):
             safe_rerun()
 
 
+@dialog_decorator("Choose Your Priority System")
+def show_prio_config_dialog(user_id: str):
+    st.session_state["_show_prio_config_modal"] = False
+
+    st.markdown("### How would you like to view & set task priorities?")
+    st.write("You can update this setting anytime from the toolbar.")
+
+    current_mode = _read_prio_config(user_id) or "Low / Medium / High"
+    prio_choice = st.radio(
+        "Select System Preference:",
+        PRIORITY_SYSTEM_MODES,
+        index=PRIORITY_SYSTEM_MODES.index(current_mode) if current_mode in PRIORITY_SYSTEM_MODES else 0,
+        key="prio_modal_radio"
+    )
+
+    if st.button("Save Preference", key="save_prio_choice_btn"):
+        _write_prio_config(user_id, prio_choice)
+        st.session_state["user_prio_mode"] = prio_choice
+        safe_rerun()
+
+
 @dialog_decorator("Create New Assignment")
-def show_add_assignment_dialog(user_id: str):
+def show_add_assignment_dialog(user_id: str, prio_mode: str):
     st.session_state["_open_add_modal"] = False
     courses = _read_courses_file(user_id) or ["MATH", "SCIENCE", "ENGLISH", "HISTORY"]
 
@@ -1079,9 +1152,24 @@ def show_add_assignment_dialog(user_id: str):
         course_free = st.text_input("Or custom course name", value="", key="add_course_free")
         status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
         due = st.date_input("Due Date", value=get_local_now().date(), key="add_due")
-        importance_label = st.selectbox("Priority", PRIORITY_OPTIONS, index=1, key="add_prio_select")
+
+        # Priority Input based on user mode preference
+        prio_val_to_save = 5
+        if prio_mode == "1 to 10 Scale (Slider)":
+            prio_val_to_save = st.slider("Priority Rating (1 - 10)", min_value=1, max_value=10, value=5, key="add_prio_slider")
+        elif prio_mode == "Both Systems":
+            c_p1, c_p2 = st.columns(2)
+            with c_p1:
+                p_lbl = st.selectbox("Priority Category", PRIORITY_OPTIONS, index=1, key="add_prio_select")
+            with c_p2:
+                p_num = st.slider("Priority Rating (1 - 10)", min_value=1, max_value=10, value=priority_to_int(p_lbl), key="add_prio_slider_both")
+            prio_val_to_save = p_num
+        else:
+            importance_label = st.selectbox("Priority", PRIORITY_OPTIONS, index=1, key="add_prio_select")
+            prio_val_to_save = priority_to_int(importance_label)
+
         atype = st.selectbox("Type", TYPE_OPTIONS, index=0, key="add_atype")
-        eta = st.text_input("Estimated Duration (e.g. 30 mins)", key="add_eta")
+        eta = st.text_input("Estimated Duration (e.g. 30 mins/day)", key="add_eta")
         notes = st.text_area("Notes", value="", key="add_notes")
         submitted_add = st.form_submit_button("Add Assignment")
 
@@ -1094,7 +1182,7 @@ def show_add_assignment_dialog(user_id: str):
                 "course": course_val.strip(),
                 "due_date": due.isoformat() if isinstance(due, date) else None,
                 "status": status,
-                "priority": priority_to_int(importance_label),
+                "priority": prio_val_to_save,
                 "atype": atype,
                 "eta": eta.strip(),
                 "created_at": get_local_now().isoformat(),
@@ -1111,7 +1199,7 @@ def show_add_assignment_dialog(user_id: str):
 
 
 @dialog_decorator("Edit Assignment Details")
-def show_edit_assignment_dialog(user_id: str, aid: str):
+def show_edit_assignment_dialog(user_id: str, aid: str, prio_mode: str):
     df_current = fetch_assignments(user_id)
     assignment = df_current[df_current["id"] == aid].to_dict(orient="records") if not df_current.empty else []
     assignment_record = assignment[0] if assignment else None
@@ -1141,13 +1229,24 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
         )
         due_parsed = parse_date_iso_or_empty(assignment_record.get("due_date")) or get_local_now().date()
         due = st.date_input("Due Date", value=due_parsed, key=f"edit_due_{aid}")
-        curr_prio_label = priority_to_label(assignment_record.get("priority"))
-        importance_label = st.selectbox(
-            "Priority",
-            PRIORITY_OPTIONS,
-            index=PRIORITY_OPTIONS.index(curr_prio_label),
-            key=f"edit_prio_select_{aid}"
-        )
+
+        # Priority Input based on active mode
+        curr_prio_num = priority_to_int(assignment_record.get("priority"))
+        curr_prio_lbl = priority_to_label(curr_prio_num)
+
+        if prio_mode == "1 to 10 Scale (Slider)":
+            prio_val_to_save = st.slider("Priority Rating (1 - 10)", min_value=1, max_value=10, value=curr_prio_num, key=f"edit_prio_slider_{aid}")
+        elif prio_mode == "Both Systems":
+            c_p1, c_p2 = st.columns(2)
+            with c_p1:
+                p_lbl = st.selectbox("Priority Category", PRIORITY_OPTIONS, index=PRIORITY_OPTIONS.index(curr_prio_lbl), key=f"edit_prio_select_{aid}")
+            with c_p2:
+                p_num = st.slider("Priority Rating (1 - 10)", min_value=1, max_value=10, value=curr_prio_num, key=f"edit_prio_slider_both_{aid}")
+            prio_val_to_save = p_num
+        else:
+            importance_label = st.selectbox("Priority", PRIORITY_OPTIONS, index=PRIORITY_OPTIONS.index(curr_prio_lbl), key=f"edit_prio_select_{aid}")
+            prio_val_to_save = priority_to_int(importance_label)
+
         atype = st.selectbox(
             "Type",
             TYPE_OPTIONS,
@@ -1172,7 +1271,7 @@ def show_edit_assignment_dialog(user_id: str, aid: str):
                 "course": course_val.strip(),
                 "due_date": due.isoformat() if isinstance(due, date) else None,
                 "status": status,
-                "priority": priority_to_int(importance_label),
+                "priority": prio_val_to_save,
                 "atype": atype,
                 "eta": eta.strip(),
                 "notes": notes.strip(),
@@ -1218,7 +1317,7 @@ def show_manage_courses_dialog(user_id: str):
 
 
 # -----------------------
-# Auth Session Control
+# Auth Session Control & Preferences
 # -----------------------
 user = st.session_state.get("user")
 
@@ -1229,14 +1328,23 @@ if not user:
 user_id = str(user.get("id"))
 email = str(user.get("email", "User"))
 
+active_prio_mode = _read_prio_config(user_id)
+
 if not _read_courses_file(user_id) and "_show_welcome_courses_modal" not in st.session_state:
     st.session_state["_show_welcome_courses_modal"] = True
+
+if not active_prio_mode and "_show_prio_config_modal" not in st.session_state:
+    st.session_state["_show_prio_config_modal"] = True
+
+user_prio_mode = active_prio_mode or "Low / Medium / High"
 
 # State Modal Launchers
 if "_open_add_modal" not in st.session_state:
     st.session_state["_open_add_modal"] = False
 if "_open_manage_courses" not in st.session_state:
     st.session_state["_open_manage_courses"] = False
+if "_show_prio_config_modal" not in st.session_state:
+    st.session_state["_show_prio_config_modal"] = False
 if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
 if "_completed_daily_slots" not in st.session_state:
@@ -1245,11 +1353,14 @@ if "_completed_daily_slots" not in st.session_state:
 if st.session_state.get("_show_welcome_courses_modal", False):
     show_welcome_courses_dialog(user_id)
 
+if st.session_state.get("_show_prio_config_modal", False):
+    show_prio_config_dialog(user_id)
+
 if st.session_state.get("_open_add_modal", False):
-    show_add_assignment_dialog(user_id)
+    show_add_assignment_dialog(user_id, user_prio_mode)
 
 if st.session_state.get("_edit_assignment_id"):
-    show_edit_assignment_dialog(user_id, st.session_state["_edit_assignment_id"])
+    show_edit_assignment_dialog(user_id, st.session_state["_edit_assignment_id"], user_prio_mode)
 
 if st.session_state.get("_open_manage_courses", False):
     show_manage_courses_dialog(user_id)
@@ -1262,12 +1373,12 @@ col_header_left, col_header_right = st.columns([2, 3])
 
 with col_header_left:
     st.markdown(
-        f"<div style='margin-bottom:4px;'><div class='app-title'>Assignment Tracker</div><div class='app-subtitle'>{email}</div></div>",
+        f"<div style='margin-bottom:4px;'><div class='app-title'>Assignment Tracker</div><div class='app-subtitle'>{email} &bull; <span style='color:#818cf8;'>System: {user_prio_mode}</span></div></div>",
         unsafe_allow_html=True,
     )
 
 with col_header_right:
-    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1.3, 1.2, 1.2, 0.9])
+    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.2, 1.1, 1.1, 1.1, 0.9])
     with btn_col1:
         if st.button("Clear Completed", key="toolbar_clear"):
             df_active = fetch_assignments(user_id)
@@ -1285,6 +1396,10 @@ with col_header_right:
             st.session_state["_open_manage_courses"] = True
             safe_rerun()
     with btn_col4:
+        if st.button("Priority View", key="toolbar_prio_sys"):
+            st.session_state["_show_prio_config_modal"] = True
+            safe_rerun()
+    with btn_col5:
         if st.button("Sign Out", key="toolbar_signout"):
             sign_out_user()
 
@@ -1311,12 +1426,12 @@ tab_assignments, tab_tests, tab_schedule = st.tabs([
 # TAB 1: Regular Assignments
 with tab_assignments:
     df_regular = df_all[df_all["atype"] != "Test & Quizzes"]
-    render_assignment_grid(df_regular, key_prefix="reg_")
+    render_assignment_grid(df_regular, user_prio_mode, key_prefix="reg_")
 
 # TAB 2: Tests & Quizzes Only
 with tab_tests:
     df_tests = df_all[df_all["atype"] == "Test & Quizzes"]
-    render_assignment_grid(df_tests, key_prefix="tests_")
+    render_assignment_grid(df_tests, user_prio_mode, key_prefix="tests_")
 
 # TAB 3: Weekly Schedule & AI Time-Slot Planner
 with tab_schedule:
@@ -1459,7 +1574,7 @@ with tab_schedule:
                 if visible_slots:
                     for idx_slot, s in enumerate(visible_slots):
                         s_key = s.get("slot_key")
-                        slot_prio = s.get("priority", priority_to_label(s.get("importance")))
+                        slot_prio_str = format_priority_display(s.get("priority"), user_prio_mode)
 
                         c_chk, c_text = st.columns([0.35, 7.65])
                         with c_chk:
@@ -1476,12 +1591,12 @@ with tab_schedule:
                         with c_text:
                             if show_time_slots:
                                 st.markdown(
-                                    f"<span class='slot-badge'>{s['time']}</span> — <b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio} ({s['eta_mins']} mins)</span>",
+                                    f"<span class='slot-badge'>{s['time']}</span> — <b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio_str} ({s['eta_mins']} mins)</span>",
                                     unsafe_allow_html=True
                                 )
                             else:
                                 st.markdown(
-                                    f"<b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio} ({s['eta_mins']} mins)</span>",
+                                    f"<b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio_str} ({s['eta_mins']} mins)</span>",
                                     unsafe_allow_html=True
                                 )
                 else:
