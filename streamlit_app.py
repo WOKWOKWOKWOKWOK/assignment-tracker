@@ -42,21 +42,31 @@ st.set_page_config(
 )
 
 # --- CORRECT PWA MANIFEST INJECTION ---
-pwa_injection = """
+# Split into tiny parts so your screen wrapping doesn't cut the links off
+base_raw_url = (
+    "https://"
+    "://githubusercontent.com"
+    "WOKWOKWOKWOKWOK/"
+    "assignment-tracker-main/"
+    "main/"
+)
+
+pwa_injection = f"""
 <script>
     const manifestLink = parent.document.createElement('link');
     manifestLink.rel = 'manifest';
-    manifestLink.href = 'https://githubusercontent.com';
+    manifestLink.href = '{base_raw_url}manifest.json';
     parent.document.head.appendChild(manifestLink);
 
     const appleIcon = parent.document.createElement('link');
     appleIcon.rel = 'apple-touch-icon';
-    appleIcon.href = 'https://githubusercontent.com';
+    appleIcon.href = '{base_raw_url}ios/180.png';
     parent.document.head.appendChild(appleIcon);
 </script>
 """
 components.html(pwa_injection, height=0, width=0)
 # --------------------------------------
+
 
 st.markdown(
     """
