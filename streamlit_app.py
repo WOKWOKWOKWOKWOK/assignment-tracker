@@ -1,10 +1,11 @@
 """
-Assignment Tracker — Daily Recurring Scheduler Edition
+Assignment Tracker — Persistent Daily Work Limit Edition
 Fixes:
-- Per-Day / Daily Task Parsing: Detects '/day', 'per day', 'a day', 'daily', etc. in ETA or notes
-  and automatically re-queues the task across all available days leading up to the due date.
+- Persistent Max Daily Work Limit: Remembers and saves your 'Max Work / Day' preference 
+  in PostgreSQL per user, restoring it automatically whenever you sign back in.
+- Daily Recurring Task Detection: Tasks with '/day', 'per day', 'daily', etc. in ETA/notes repeat daily.
 - Dual Priority Modes: Support for Low/Medium/High, 1-10 slider, or Both.
-- Bottom Margin & Card Spacing: Clean layout rendering without HTML code box leaks.
+- Spacing & HTML Fixes: Clean layout formatting with no raw tag leaks.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ def get_local_now() -> datetime:
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
-    page_icon="📚",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -431,6 +432,10 @@ def get_prio_config_id(user_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_prio_config_{user_id}"))
 
 
+def get_max_work_config_id(user_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_max_work_config_{user_id}"))
+
+
 def _pack_notes(notes_text: str, prev_status: str) -> str:
     return json.dumps({"text": notes_text, "prev_status": prev_status})
 
@@ -496,7 +501,7 @@ def sign_in_user(email: str, password: str) -> Dict[str, Any]:
 
 
 def sign_out_user() -> None:
-    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_undo_slot_state", "user_prio_mode"]:
+    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_undo_slot_state", "user_prio_mode", "select_max_daily_work"]:
         if key in st.session_state:
             del st.session_state[key]
     safe_rerun()
@@ -606,11 +611,44 @@ def _write_prio_config(user_id: str, mode: str) -> None:
         })
 
 
+def _read_max_work_config(user_id: str) -> int:
+    cfg_id = get_max_work_config_id(user_id)
+    sql = text("SELECT notes FROM assignments WHERE id = :id AND user_id = :uid")
+    with engine.connect() as conn:
+        row = conn.execute(sql, {"id": cfg_id, "uid": user_id}).fetchone()
+        if row and row.notes:
+            try:
+                val = int(str(row.notes).strip())
+                if val in [45, 60, 90, 120, 180]:
+                    return val
+            except ValueError:
+                pass
+    return 60
+
+
+def _write_max_work_config(user_id: str, max_mins: int) -> None:
+    if not user_id:
+        return
+    cfg_id = get_max_work_config_id(user_id)
+    sql = text("""
+        INSERT INTO assignments (id, user_id, title, course, due_date, status, priority, atype, eta, notes, created_at)
+        VALUES (:id, :user_id, '__SYSTEM_MAX_WORK_CONFIG__', 'CONFIG', '', 'Not Started', 0, 'Other', '', :notes, :created_at)
+        ON CONFLICT (id) DO UPDATE SET notes = EXCLUDED.notes, user_id = EXCLUDED.user_id;
+    """)
+    with engine.begin() as conn:
+        conn.execute(sql, {
+            "id": cfg_id,
+            "user_id": user_id,
+            "notes": str(max_mins),
+            "created_at": get_local_now().isoformat()
+        })
+
+
 def fetch_assignments(user_id: str) -> pd.DataFrame:
     sql = text("""
         SELECT * FROM assignments 
         WHERE user_id = :uid 
-          AND title NOT IN ('__SYSTEM_COURSES__', '__SYSTEM_SCHEDULE__', '__SYSTEM_PRIO_CONFIG__')
+          AND title NOT IN ('__SYSTEM_COURSES__', '__SYSTEM_SCHEDULE__', '__SYSTEM_PRIO_CONFIG__', '__SYSTEM_MAX_WORK_CONFIG__')
     """)
     with engine.connect() as conn:
         df = pd.read_sql(sql, conn, params={"uid": user_id})
@@ -1329,6 +1367,7 @@ user_id = str(user.get("id"))
 email = str(user.get("email", "User"))
 
 active_prio_mode = _read_prio_config(user_id)
+stored_max_daily_work = _read_max_work_config(user_id)
 
 if not _read_courses_file(user_id) and "_show_welcome_courses_modal" not in st.session_state:
     st.session_state["_show_welcome_courses_modal"] = True
@@ -1526,10 +1565,22 @@ with tab_schedule:
             show_time_slots = st.toggle("Show Time Slots", value=True, key="toggle_show_time_slots")
 
         with ctrl_col3:
+            max_work_options = [45, 60, 90, 120, 180]
+            default_max_index = max_work_options.index(stored_max_daily_work) if stored_max_daily_work in max_work_options else 1
+
+            def on_max_work_change():
+                new_max_val = st.session_state.get("select_max_daily_work")
+                if new_max_val:
+                    _write_max_work_config(user_id, new_max_val)
+                    if "_ai_plan_result" in st.session_state:
+                        del st.session_state["_ai_plan_result"]
+
             max_daily_study = st.selectbox(
                 "Max Work / Day",
-                options=[45, 60, 90, 120, 180],
-                index=1,
+                options=max_work_options,
+                index=default_max_index,
+                key="select_max_daily_work",
+                on_change=on_max_work_change,
                 format_func=lambda x: f"{x} mins max",
             )
 
