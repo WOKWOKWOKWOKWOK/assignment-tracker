@@ -37,7 +37,7 @@ def get_local_now() -> datetime:
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
-    page_icon="⚡",
+    page_icon="ᏂᎧᎷᏋᏇᎧᏒᏦ",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
