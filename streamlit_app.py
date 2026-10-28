@@ -22,6 +22,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from sqlalchemy import create_engine, text
 
+st.set_option("client.toolbarMode", "viewer")
 
 # Timezone helper for Simsbury/Eastern Time
 def get_local_now() -> datetime:
