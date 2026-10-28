@@ -22,7 +22,20 @@ import streamlit as st
 import streamlit.components.v1 as components
 from sqlalchemy import create_engine, text
 
-st.set_option("client.toolbarMode", "viewer")
+# Hide the "Manage App" button and the floating connection bar
+hide_manage_app = """
+<style>
+    /* Target the specific container for the Streamlit Community Cloud toolbar */
+    [data-testid="stStatusWidget"],
+    div[class^="st-emotion-cache"] iframe, 
+    .stAppDeployButton,
+    footer {
+        visibility: hidden !important;
+        display: none !important;
+    }
+</style>
+"""
+st.markdown(hide_manage_app, unsafe_allow_html=True)
 
 # Timezone helper for Simsbury/Eastern Time
 def get_local_now() -> datetime:
