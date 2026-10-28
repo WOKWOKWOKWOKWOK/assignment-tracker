@@ -1,10 +1,11 @@
 """
-Assignment Tracker — Dedicated "Other" Tab Edition
+Assignment Tracker — Per-Day Custom Work Limits Edition
 Fixes:
-- Dedicated "Other" Tab: Filters tasks where type is 'Other' or course is 'OTHER' into a standalone tab.
-- Clean Tab Separation: Keeps main Assignments, Tests & Quizzes, Other, and AI Planner cleanly organized.
-- Persistent Daily Work Limit: Remembers your 'Max Work / Day' preference per user.
-- Dual Priority System: Supports Low/Med/High badges, 1-10 slider, or Both.
+- Per-Day Custom Work Limits: Set individual daily study limits for each day of the week 
+  (Mon, Tue, Wed, Thu, Fri, Sat, Sun).
+- Persistent Per-Day Config: Remembers your custom daily limit schedule across sessions in PostgreSQL.
+- Daily Recurring Task Detection: Tasks with '/day', 'per day', 'daily', etc., repeat automatically.
+- Dedicated "Other" Tab & Dual Priority Modes (Low/Med/High, 1-10 Slider, or Both).
 """
 
 from __future__ import annotations
@@ -502,7 +503,7 @@ def sign_in_user(email: str, password: str) -> Dict[str, Any]:
 
 
 def sign_out_user() -> None:
-    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_undo_slot_state", "user_prio_mode", "select_max_daily_work"]:
+    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_undo_slot_state", "user_prio_mode"]:
         if key in st.session_state:
             del st.session_state[key]
     safe_rerun()
@@ -612,22 +613,29 @@ def _write_prio_config(user_id: str, mode: str) -> None:
         })
 
 
-def _read_max_work_config(user_id: str) -> int:
+def _read_max_work_config(user_id: str) -> Dict[str, int]:
     cfg_id = get_max_work_config_id(user_id)
     sql = text("SELECT notes FROM assignments WHERE id = :id AND user_id = :uid")
+    default_dict = {d: 60 for d in DAYS_OF_WEEK}
     with engine.connect() as conn:
         row = conn.execute(sql, {"id": cfg_id, "uid": user_id}).fetchone()
         if row and row.notes:
             try:
-                val = int(str(row.notes).strip())
-                if val in [45, 60, 90, 120, 180]:
-                    return val
-            except ValueError:
+                parsed = json.loads(row.notes)
+                if isinstance(parsed, dict):
+                    for d in DAYS_OF_WEEK:
+                        if d in parsed and isinstance(parsed[d], int):
+                            default_dict[d] = parsed[d]
+                    return default_dict
+                elif isinstance(parsed, int) or str(row.notes).strip().isdigit():
+                    val = int(str(row.notes).strip())
+                    return {d: val for d in DAYS_OF_WEEK}
+            except Exception:
                 pass
-    return 60
+    return default_dict
 
 
-def _write_max_work_config(user_id: str, max_mins: int) -> None:
+def _write_max_work_config(user_id: str, max_mins_dict: Dict[str, int]) -> None:
     if not user_id:
         return
     cfg_id = get_max_work_config_id(user_id)
@@ -640,7 +648,7 @@ def _write_max_work_config(user_id: str, max_mins: int) -> None:
         conn.execute(sql, {
             "id": cfg_id,
             "user_id": user_id,
-            "notes": str(max_mins),
+            "notes": json.dumps(max_mins_dict),
             "created_at": get_local_now().isoformat()
         })
 
@@ -839,9 +847,13 @@ def days_left(d: Optional[date]) -> Tuple[str, int]:
 
 
 # -----------------------
-# AI Time-Slot Scheduler Engine
+# AI Time-Slot Scheduler Engine (Per-Day Custom Limit Support)
 # -----------------------
-def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]], max_daily_mins: int = 60) -> Dict[str, Any]:
+def generate_ai_study_plan(
+    df_tasks: pd.DataFrame, 
+    schedule: List[Dict[str, Any]], 
+    max_daily_mins_config: Dict[str, int] | int = 60
+) -> Dict[str, Any]:
     if df_tasks.empty:
         return {"status": "no_tasks", "plan": {}}
 
@@ -901,6 +913,11 @@ def generate_ai_study_plan(df_tasks: pd.DataFrame, schedule: List[Dict[str, Any]
     for i in range(7):
         day_date = today + timedelta(days=i)
         day_name = DAYS_OF_WEEK[day_date.weekday()]
+
+        if isinstance(max_daily_mins_config, dict):
+            max_daily_mins = max_daily_mins_config.get(day_name, 60)
+        else:
+            max_daily_mins = int(max_daily_mins_config)
 
         if day_date.weekday() in (5, 6):
             default_start_mins = 10 * 60
@@ -1372,7 +1389,7 @@ user_id = str(user.get("id"))
 email = str(user.get("email", "User"))
 
 active_prio_mode = _read_prio_config(user_id)
-stored_max_daily_work = _read_max_work_config(user_id)
+stored_max_daily_work_dict = _read_max_work_config(user_id)
 
 if not _read_courses_file(user_id) and "_show_welcome_courses_modal" not in st.session_state:
     st.session_state["_show_welcome_courses_modal"] = True
@@ -1468,7 +1485,7 @@ tab_assignments, tab_tests, tab_other, tab_schedule = st.tabs([
     "Weekly Schedule & AI Planner"
 ])
 
-# TAB 1: Regular Assignments (Homework, Essay, Presentation, etc.)
+# TAB 1: Regular Assignments
 with tab_assignments:
     df_regular = df_all[
         (df_all["atype"] != "Test & Quizzes") & 
@@ -1574,7 +1591,7 @@ with tab_schedule:
             else:
                 del st.session_state["_undo_slot_state"]
 
-        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1.5, 1.2, 1.3])
+        ctrl_col1, ctrl_col2 = st.columns([1.5, 1.2])
 
         with ctrl_col1:
             gen_plan_click = st.button("Re-Calculate Plan", key="btn_gen_ai_plan")
@@ -1582,35 +1599,42 @@ with tab_schedule:
         with ctrl_col2:
             show_time_slots = st.toggle("Show Time Slots", value=True, key="toggle_show_time_slots")
 
-        with ctrl_col3:
-            max_work_options = [45, 60, 90, 120, 180]
-            default_max_index = max_work_options.index(stored_max_daily_work) if stored_max_daily_work in max_work_options else 1
+        # Per-Day Max Work Limit Expander Controller
+        with st.expander("⏱️ Customize Daily Work Limits (Per Day)", expanded=False):
+            st.caption("Set maximum allowed study/work time independently for each day of the week:")
+            opts = [0, 15, 30, 45, 60, 90, 120, 150, 180, 240]
+            
+            day_cols = st.columns(7)
+            new_limits_dict = {}
+            
+            for d_idx, d_name in enumerate(DAYS_OF_WEEK):
+                with day_cols[d_idx]:
+                    cur_val = stored_max_daily_work_dict.get(d_name, 60)
+                    cur_idx = opts.index(cur_val) if cur_val in opts else 4
+                    val = st.selectbox(
+                        d_name[:3],
+                        options=opts,
+                        index=cur_idx,
+                        key=f"p_limit_{d_name}",
+                        format_func=lambda x: f"{x}m"
+                    )
+                    new_limits_dict[d_name] = val
 
-            def on_max_work_change():
-                new_max_val = st.session_state.get("select_max_daily_work")
-                if new_max_val:
-                    _write_max_work_config(user_id, new_max_val)
-                    if "_ai_plan_result" in st.session_state:
-                        del st.session_state["_ai_plan_result"]
-
-            max_daily_study = st.selectbox(
-                "Max Work / Day",
-                options=max_work_options,
-                index=default_max_index,
-                key="select_max_daily_work",
-                on_change=on_max_work_change,
-                format_func=lambda x: f"{x} mins max",
-            )
+            if new_limits_dict != stored_max_daily_work_dict:
+                _write_max_work_config(user_id, new_limits_dict)
+                if "_ai_plan_result" in st.session_state:
+                    del st.session_state["_ai_plan_result"]
+                safe_rerun()
 
         fresh_assignments = fetch_assignments(user_id)
 
         if gen_plan_click:
             st.session_state["_ai_plan_result"] = generate_ai_study_plan(
-                fresh_assignments, user_schedule, max_daily_mins=max_daily_study
+                fresh_assignments, user_schedule, max_daily_mins_config=stored_max_daily_work_dict
             )
 
         plan_res = st.session_state.get("_ai_plan_result") or generate_ai_study_plan(
-            fresh_assignments, user_schedule, max_daily_mins=max_daily_study
+            fresh_assignments, user_schedule, max_daily_mins_config=stored_max_daily_work_dict
         )
 
         status = plan_res.get("status")
@@ -1626,12 +1650,16 @@ with tab_schedule:
             for day_name, day_data in plan.items():
                 if not isinstance(day_data, dict):
                     st.session_state["_ai_plan_result"] = generate_ai_study_plan(
-                        fresh_assignments, user_schedule, max_daily_mins=max_daily_study
+                        fresh_assignments, user_schedule, max_daily_mins_config=stored_max_daily_work_dict
                     )
                     safe_rerun()
                     break
 
-                st.markdown(f'<div class="ai-day-card"><div class="ai-day-title">{day_name}</div>', unsafe_allow_html=True)
+                day_cap_mins = stored_max_daily_work_dict.get(day_name, 60)
+                st.markdown(
+                    f'<div class="ai-day-card"><div class="ai-day-title">{day_name} <span style="font-size:0.75rem; color:#64748b; font-weight:500; text-transform:none;">(Max {day_cap_mins}m)</span></div>',
+                    unsafe_allow_html=True
+                )
 
                 busy_list = day_data.get("busy", [])
                 if busy_list:
