@@ -1681,16 +1681,15 @@ with tab_schedule:
                     if st.button("Undo", key="btn_undo_slot", on_click=on_undo_daily_slot, args=(user_id,), use_container_width=True):
                         safe_rerun()
 
-                components.html(
-                    f"""
-                    <script>
-                        setTimeout(function() {{
-                            window.parent.postMessage({{type: 'streamlit:rerun'}}, '*');
-                        }}, {int(remaining_sec * 1000)});
-                    </script>
-                    """,
-                    height=0,
-                )
+               # Replace this section in tab_schedule:
+js_trigger = (
+    "<script>\n"
+    "setTimeout(function() {\n"
+    "    window.parent.postMessage({type: 'streamlit:rerun'}, '*');\n"
+    f"}}, {int(remaining_sec * 1000)});\n"
+    "</script>"
+)
+components.html(js_trigger, height=0)
             else:
                 del st.session_state["_undo_slot_state"]
 
