@@ -1,14 +1,14 @@
 """
-Assignment Tracker — Persistent Daily Slot & Auto-Reset Edition
+Assignment Tracker — 📚 Recovery & Auto-Cleanup Edition
 Fixes & Enhancements:
-- Database-Backed Daily Slot Persistence: Checked off daily schedule items are now saved 
-  to PostgreSQL instantly, so refreshing, closing the browser tab, or opening on another 
-  device keeps them completed.
-- Daily Midnight Auto-Reset: Completed daily planner slots automatically clear at midnight 
-  (when the calendar day changes), giving you a completely fresh start for the new day.
-- Completed & Recovery Center: Daily checked tasks appear in the recovery tab until the day 
-  ends, allowing instant one-click restoration if checked by mistake.
-- Hours & Minutes Formatting, Mobile-Optimized Layout, Auto-Fill Login Support.
+- Main Tab Filtering: Tasks marked "Done" immediately disappear from the main 
+  Assignments, Tests & Quizzes, and Other tabs so active views stay clean.
+- Automatic Post-Due-Date Purge: Completed assignments remain safely stored in 
+  the Completed & Recovery tab until their due date passes, after which they 
+  automatically clear. The manual "Clear Completed" button has been removed.
+- Full Restoration: Restoring a task from the Completed & Recovery tab brings 
+  it straight back into its original assignment tab with its previous status intact.
+- Persistent Daily AI Planner Slots & Midnight Reset.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def get_local_now() -> datetime:
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
-    page_icon="⚡",
+    page_icon="📚",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -756,10 +756,7 @@ def _write_max_work_config(user_id: str, max_mins_dict: Dict[str, int]) -> None:
 
 
 def _read_completed_slots(user_id: str) -> Dict[str, Dict[str, Any]]:
-    """
-    Reads today's completed daily slots from database.
-    Automatically purges items from previous days so that each day starts fresh!
-    """
+    """Reads today's completed daily slots from database, auto-clearing old days at midnight."""
     cfg_id = get_completed_slots_config_id(user_id)
     sql = text("SELECT notes FROM assignments WHERE id = :id AND user_id = :uid")
     today_str = get_local_now().date().isoformat()
@@ -801,7 +798,22 @@ def _write_completed_slots(user_id: str, today_slots: Dict[str, Dict[str, Any]])
 
 
 def fetch_assignments(user_id: str) -> pd.DataFrame:
-    sql = text("""
+    """
+    Fetches assignments from the database.
+    Automatically purges completed ('Done') assignments whose due date has passed.
+    """
+    today_iso = get_local_now().date().isoformat()
+
+    sql_purge_expired = text("""
+        DELETE FROM assignments
+        WHERE user_id = :uid
+          AND status = 'Done'
+          AND due_date IS NOT NULL
+          AND due_date != ''
+          AND due_date < :today_iso;
+    """)
+
+    sql_fetch = text("""
         SELECT * FROM assignments 
         WHERE user_id = :uid 
           AND title NOT IN (
@@ -812,8 +824,10 @@ def fetch_assignments(user_id: str) -> pd.DataFrame:
             '__SYSTEM_COMPLETED_SLOTS__'
           )
     """)
-    with engine.connect() as conn:
-        df = pd.read_sql(sql, conn, params={"uid": user_id})
+
+    with engine.begin() as conn:
+        conn.execute(sql_purge_expired, {"uid": user_id, "today_iso": today_iso})
+        df = pd.read_sql(sql_fetch, conn, params={"uid": user_id})
 
     if df.empty:
         return pd.DataFrame(columns=[
@@ -1190,7 +1204,7 @@ def render_terminal_auth_page():
     with c_center:
         st.markdown(
             "<div style='background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px 28px; text-align: center; margin-bottom: 20px; backdrop-filter: blur(12px); shadow: 0 10px 30px rgba(0,0,0,0.5);'>"
-            "<div style='font-size: 1.9rem; font-weight: 800; color: #ffffff; letter-spacing: -0.03em;'>Assignment Tracker</div>"
+            "<div style='font-size: 1.9rem; font-weight: 800; color: #ffffff; letter-spacing: -0.03em;'>📚 Assignment Tracker</div>"
             "<div style='font-size: 0.85rem; color: #64748b; margin-top: 4px;'>Simsbury High School Portal</div>"
             "</div>",
             unsafe_allow_html=True,
@@ -1250,7 +1264,7 @@ def render_terminal_auth_page():
 # -----------------------
 def render_assignment_grid(df_grid: pd.DataFrame, user_prio_mode: str, key_prefix: str = "reg_"):
     if df_grid.empty:
-        st.markdown("<div style='padding:50px 0; text-align:center; color:#475569; font-size:0.9rem;'>No assignments in this view.</div>", unsafe_allow_html=True)
+        st.markdown("<div style='padding:50px 0; text-align:center; color:#475569; font-size:0.9rem;'>No active assignments in this view.</div>", unsafe_allow_html=True)
         return
 
     df_sorted = df_grid.copy()
@@ -1607,37 +1621,29 @@ if st.session_state.get("_open_manage_courses", False):
 # -----------------------
 # Main App Header
 # -----------------------
-col_header_left, col_header_right = st.columns([2, 3])
+col_header_left, col_header_right = st.columns([2.2, 2.8])
 
 with col_header_left:
     st.markdown(
-        f"<div style='margin-bottom:6px;'><div class='app-title'>Assignment Tracker</div><div class='app-subtitle'>{email} &bull; <span style='color:#818cf8;'>System: {user_prio_mode}</span></div></div>",
+        f"<div style='margin-bottom:6px;'><div class='app-title'>📚 Assignment Tracker</div><div class='app-subtitle'>{email} &bull; <span style='color:#818cf8;'>System: {user_prio_mode}</span></div></div>",
         unsafe_allow_html=True,
     )
 
 with col_header_right:
-    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.2, 1.1, 1.1, 1.1, 0.9])
+    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1.1, 1.1, 1.1, 0.9])
     with btn_col1:
-        if st.button("Clear Completed", key="toolbar_clear", use_container_width=True):
-            df_active = fetch_assignments(user_id)
-            if not df_active.empty:
-                done_ids = df_active[df_active["status"] == "Done"]["id"].tolist()
-                for aid in done_ids:
-                    delete_assignment(aid)
-            safe_rerun()
-    with btn_col2:
         if st.button("New Task", key="toolbar_add", use_container_width=True):
             st.session_state["_open_add_modal"] = True
             safe_rerun()
-    with btn_col3:
+    with btn_col2:
         if st.button("Courses", key="toolbar_courses", use_container_width=True):
             st.session_state["_open_manage_courses"] = True
             safe_rerun()
-    with btn_col4:
+    with btn_col3:
         if st.button("Priority View", key="toolbar_prio_sys", use_container_width=True):
             st.session_state["_show_prio_config_modal"] = True
             safe_rerun()
-    with btn_col5:
+    with btn_col4:
         if st.button("Sign Out", key="toolbar_signout", use_container_width=True):
             sign_out_user()
 
@@ -1663,25 +1669,29 @@ tab_assignments, tab_tests, tab_other, tab_schedule, tab_completed = st.tabs([
     "Completed & Recovery"
 ])
 
-# TAB 1: Regular Assignments
+# TAB 1: Regular Assignments (Filters out 'Done' tasks so completed items disappear)
 with tab_assignments:
     df_regular = df_all[
+        (df_all["status"] != "Done") & 
         (df_all["atype"] != "Test & Quizzes") & 
         (df_all["atype"] != "Other") & 
         (df_all["course"] != "OTHER")
     ]
     render_assignment_grid(df_regular, user_prio_mode, key_prefix="reg_")
 
-# TAB 2: Tests & Quizzes Only
+# TAB 2: Tests & Quizzes Only (Filters out 'Done' tasks)
 with tab_tests:
-    df_tests = df_all[df_all["atype"] == "Test & Quizzes"]
+    df_tests = df_all[
+        (df_all["status"] != "Done") & 
+        (df_all["atype"] == "Test & Quizzes")
+    ]
     render_assignment_grid(df_tests, user_prio_mode, key_prefix="tests_")
 
-# TAB 3: Dedicated "Other" Tasks Section
+# TAB 3: Dedicated "Other" Tasks Section (Filters out 'Done' tasks)
 with tab_other:
     df_other = df_all[
-        (df_all["atype"] == "Other") | 
-        (df_all["course"] == "OTHER")
+        (df_all["status"] != "Done") & 
+        ((df_all["atype"] == "Other") | (df_all["course"] == "OTHER"))
     ]
     render_assignment_grid(df_other, user_prio_mode, key_prefix="other_")
 
@@ -1823,7 +1833,6 @@ with tab_schedule:
         elif status == "all_done":
             st.success("All assignments marked completed!")
         elif status == "success" and plan:
-            # Read persistent completed slots for today from PostgreSQL database
             completed_slots_today = _read_completed_slots(user_id)
             completed_set = set(completed_slots_today.keys())
 
@@ -1894,7 +1903,7 @@ with tab_schedule:
 # TAB 5: Completed Items & Recovery Tab
 with tab_completed:
     st.markdown("<div style='font-weight:800; font-size:1.2rem; color:#f8fafc; margin-bottom:4px;'>Completed Tasks & Recovery Center</div>", unsafe_allow_html=True)
-    st.caption("Items checked off today remain stored here until midnight. Click 'Restore to Planner' anytime to bring them back.")
+    st.caption("Finished assignments stay here until their due date passes. Restoring an item returns it to your active tab with its previous status.")
 
     rec_col1, rec_col2 = st.columns(2)
 
@@ -1924,17 +1933,6 @@ with tab_completed:
         df_done_db = df_all[df_all["status"] == "Done"].copy()
 
         if not df_done_db.empty:
-            if st.button("Restore ALL Completed Assignments", key="rec_all_db_btn", use_container_width=True):
-                rows_to_update = []
-                for _, r in df_done_db.iterrows():
-                    r_dict = r.to_dict()
-                    p_st = r_dict.get("prev_status") or "In Progress"
-                    r_dict["status"] = p_st if p_st != "Done" else "In Progress"
-                    rows_to_update.append(r_dict)
-                upsert_assignments(rows_to_update)
-                safe_rerun()
-
-            st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
             for _, r_done in df_done_db.iterrows():
                 r_aid = r_done.get("id")
                 c_info_db, c_act_db = st.columns([4, 1.4])
