@@ -1,13 +1,14 @@
 """
-Assignment Tracker — Recovery & Completed Items Edition
-New Features:
-- Completed & Recovery Tab: Dedicated tab listing all daily planner slots completed today 
-  and all finished assignments from your main database.
-- One-Click Task Restoration: Instantly un-mark accidentally checked items and bring them 
-  back into your active daily AI schedule or main assignment grids.
-- Bulk Recovery Option: "Restore All Completed" button to quickly reactivate all finished work.
-- Formatted Work Metrics: Displays daily scheduled time vs. capacity limits in hours and minutes.
-- Mobile & Phone Responsive UI with Auto-Fill Supported Auth.
+Assignment Tracker — Persistent Daily Slot & Auto-Reset Edition
+Fixes & Enhancements:
+- Database-Backed Daily Slot Persistence: Checked off daily schedule items are now saved 
+  to PostgreSQL instantly, so refreshing, closing the browser tab, or opening on another 
+  device keeps them completed.
+- Daily Midnight Auto-Reset: Completed daily planner slots automatically clear at midnight 
+  (when the calendar day changes), giving you a completely fresh start for the new day.
+- Completed & Recovery Center: Daily checked tasks appear in the recovery tab until the day 
+  ends, allowing instant one-click restoration if checked by mistake.
+- Hours & Minutes Formatting, Mobile-Optimized Layout, Auto-Fill Login Support.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ def get_local_now() -> datetime:
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
-    page_icon="📚",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -535,6 +536,10 @@ def get_max_work_config_id(user_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_max_work_config_{user_id}"))
 
 
+def get_completed_slots_config_id(user_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_completed_slots_config_{user_id}"))
+
+
 def _pack_notes(notes_text: str, prev_status: str) -> str:
     return json.dumps({"text": notes_text, "prev_status": prev_status})
 
@@ -600,14 +605,14 @@ def sign_in_user(email: str, password: str) -> Dict[str, Any]:
 
 
 def sign_out_user() -> None:
-    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_completed_daily_slots_dict", "_undo_slot_state", "user_prio_mode"]:
+    for key in ["user", "df_cached", "_ai_plan_result", "_undo_slot_state", "user_prio_mode"]:
         if key in st.session_state:
             del st.session_state[key]
     safe_rerun()
 
 
 # -----------------------
-# Database CRUD Operations
+# Database CRUD Operations & Persistence Handlers
 # -----------------------
 def invalidate_cache():
     if "df_cached" in st.session_state:
@@ -750,11 +755,62 @@ def _write_max_work_config(user_id: str, max_mins_dict: Dict[str, int]) -> None:
         })
 
 
+def _read_completed_slots(user_id: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Reads today's completed daily slots from database.
+    Automatically purges items from previous days so that each day starts fresh!
+    """
+    cfg_id = get_completed_slots_config_id(user_id)
+    sql = text("SELECT notes FROM assignments WHERE id = :id AND user_id = :uid")
+    today_str = get_local_now().date().isoformat()
+
+    with engine.connect() as conn:
+        row = conn.execute(sql, {"id": cfg_id, "uid": user_id}).fetchone()
+        if row and row.notes:
+            try:
+                parsed = json.loads(row.notes)
+                if isinstance(parsed, dict):
+                    today_data = parsed.get(today_str, {})
+                    if isinstance(today_data, dict):
+                        return today_data
+            except Exception:
+                pass
+    return {}
+
+
+def _write_completed_slots(user_id: str, today_slots: Dict[str, Dict[str, Any]]) -> None:
+    """Saves today's completed daily slots to PostgreSQL."""
+    if not user_id:
+        return
+    cfg_id = get_completed_slots_config_id(user_id)
+    today_str = get_local_now().date().isoformat()
+    payload = {today_str: today_slots}
+
+    sql = text("""
+        INSERT INTO assignments (id, user_id, title, course, due_date, status, priority, atype, eta, notes, created_at)
+        VALUES (:id, :user_id, '__SYSTEM_COMPLETED_SLOTS__', 'CONFIG', '', 'Not Started', 0, 'Other', '', :notes, :created_at)
+        ON CONFLICT (id) DO UPDATE SET notes = EXCLUDED.notes, user_id = EXCLUDED.user_id;
+    """)
+    with engine.begin() as conn:
+        conn.execute(sql, {
+            "id": cfg_id,
+            "user_id": user_id,
+            "notes": json.dumps(payload),
+            "created_at": get_local_now().isoformat()
+        })
+
+
 def fetch_assignments(user_id: str) -> pd.DataFrame:
     sql = text("""
         SELECT * FROM assignments 
         WHERE user_id = :uid 
-          AND title NOT IN ('__SYSTEM_COURSES__', '__SYSTEM_SCHEDULE__', '__SYSTEM_PRIO_CONFIG__', '__SYSTEM_MAX_WORK_CONFIG__')
+          AND title NOT IN (
+            '__SYSTEM_COURSES__', 
+            '__SYSTEM_SCHEDULE__', 
+            '__SYSTEM_PRIO_CONFIG__', 
+            '__SYSTEM_MAX_WORK_CONFIG__', 
+            '__SYSTEM_COMPLETED_SLOTS__'
+          )
     """)
     with engine.connect() as conn:
         df = pd.read_sql(sql, conn, params={"uid": user_id})
@@ -872,42 +928,41 @@ def on_status_change(aid: str, row_dict: Dict[str, Any], sel_key: str, chk_key: 
         safe_rerun()
 
 
-def on_daily_slot_check(slot_key: str, task_title: str, slot_dict: Optional[Dict[str, Any]] = None):
-    if "_completed_daily_slots" not in st.session_state:
-        st.session_state["_completed_daily_slots"] = set()
-    if "_completed_daily_slots_dict" not in st.session_state:
-        st.session_state["_completed_daily_slots_dict"] = {}
-
-    st.session_state["_completed_daily_slots"].add(slot_key)
-    if slot_dict:
-        st.session_state["_completed_daily_slots_dict"][slot_key] = slot_dict
+def on_daily_slot_check(slot_key: str, task_title: str, slot_dict: Dict[str, Any], user_id: str):
+    completed_today = _read_completed_slots(user_id)
+    completed_today[slot_key] = slot_dict
+    _write_completed_slots(user_id, completed_today)
 
     st.session_state["_undo_slot_state"] = {
         "slot_key": slot_key,
         "title": task_title,
+        "user_id": user_id,
         "time": get_local_now()
     }
 
 
-def on_undo_daily_slot():
+def on_undo_daily_slot(user_id: str):
     undo_info = st.session_state.get("_undo_slot_state")
     if undo_info:
         s_key = undo_info["slot_key"]
-        if "_completed_daily_slots" in st.session_state:
-            st.session_state["_completed_daily_slots"].discard(s_key)
-        if "_completed_daily_slots_dict" in st.session_state:
-            st.session_state["_completed_daily_slots_dict"].pop(s_key, None)
+        completed_today = _read_completed_slots(user_id)
+        completed_today.pop(s_key, None)
+        _write_completed_slots(user_id, completed_today)
+
         for k in list(st.session_state.keys()):
             if s_key in k:
                 st.session_state[k] = False
         del st.session_state["_undo_slot_state"]
 
 
-def restore_single_daily_slot(slot_key: str):
-    if "_completed_daily_slots" in st.session_state:
-        st.session_state["_completed_daily_slots"].discard(slot_key)
-    if "_completed_daily_slots_dict" in st.session_state:
-        st.session_state["_completed_daily_slots_dict"].pop(slot_key, None)
+def restore_single_daily_slot(slot_key: str, user_id: str):
+    completed_today = _read_completed_slots(user_id)
+    completed_today.pop(slot_key, None)
+    _write_completed_slots(user_id, completed_today)
+
+    for k in list(st.session_state.keys()):
+        if slot_key in k:
+            st.session_state[k] = False
     safe_rerun()
 
 
@@ -1523,7 +1578,7 @@ if not active_prio_mode and "_show_prio_config_modal" not in st.session_state:
 
 user_prio_mode = active_prio_mode or "Low / Medium / High"
 
-# State Modal Launchers & Sets
+# State Modal Launchers
 if "_open_add_modal" not in st.session_state:
     st.session_state["_open_add_modal"] = False
 if "_open_manage_courses" not in st.session_state:
@@ -1532,10 +1587,6 @@ if "_show_prio_config_modal" not in st.session_state:
     st.session_state["_show_prio_config_modal"] = False
 if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
-if "_completed_daily_slots" not in st.session_state:
-    st.session_state["_completed_daily_slots"] = set()
-if "_completed_daily_slots_dict" not in st.session_state:
-    st.session_state["_completed_daily_slots_dict"] = {}
 
 if st.session_state.get("_show_welcome_courses_modal", False):
     show_welcome_courses_dialog(user_id)
@@ -1602,7 +1653,7 @@ if "df_cached" not in st.session_state:
 df_all = st.session_state.df_cached.copy()
 
 # -----------------------
-# Navigation Tabs (Includes New Recovery Tab)
+# Navigation Tabs
 # -----------------------
 tab_assignments, tab_tests, tab_other, tab_schedule, tab_completed = st.tabs([
     "Assignments", 
@@ -1702,7 +1753,7 @@ with tab_schedule:
                         unsafe_allow_html=True,
                     )
                 with u_col2:
-                    if st.button("Undo", key="btn_undo_slot", on_click=on_undo_daily_slot, use_container_width=True):
+                    if st.button("Undo", key="btn_undo_slot", on_click=on_undo_daily_slot, args=(user_id,), use_container_width=True):
                         safe_rerun()
 
                 components.html(
@@ -1772,7 +1823,9 @@ with tab_schedule:
         elif status == "all_done":
             st.success("All assignments marked completed!")
         elif status == "success" and plan:
-            completed_set = st.session_state.get("_completed_daily_slots", set())
+            # Read persistent completed slots for today from PostgreSQL database
+            completed_slots_today = _read_completed_slots(user_id)
+            completed_set = set(completed_slots_today.keys())
 
             for day_name, day_data in plan.items():
                 if not isinstance(day_data, dict):
@@ -1819,7 +1872,7 @@ with tab_schedule:
                                 key=chk_widget_key,
                                 label_visibility="collapsed",
                                 on_change=on_daily_slot_check,
-                                args=(s_key, s["title"], s)
+                                args=(s_key, s["title"], s, user_id)
                             )
 
                         with c_text:
@@ -1841,13 +1894,13 @@ with tab_schedule:
 # TAB 5: Completed Items & Recovery Tab
 with tab_completed:
     st.markdown("<div style='font-weight:800; font-size:1.2rem; color:#f8fafc; margin-bottom:4px;'>Completed Tasks & Recovery Center</div>", unsafe_allow_html=True)
-    st.caption("Accidentally completed something? Restore items back into your active planner or assignment tabs below.")
+    st.caption("Items checked off today remain stored here until midnight. Click 'Restore to Planner' anytime to bring them back.")
 
     rec_col1, rec_col2 = st.columns(2)
 
     with rec_col1:
         st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#38bdf8; margin-bottom:12px;'>1. Daily Planner Slots Checked Today</div>", unsafe_allow_html=True)
-        completed_slots_dict = st.session_state.get("_completed_daily_slots_dict", {})
+        completed_slots_dict = _read_completed_slots(user_id)
 
         if completed_slots_dict:
             for s_key, s_data in list(completed_slots_dict.items()):
@@ -1862,7 +1915,7 @@ with tab_completed:
                     )
                 with c_act:
                     if st.button("Restore to Planner", key=f"rec_slot_{s_key}", use_container_width=True):
-                        restore_single_daily_slot(s_key)
+                        restore_single_daily_slot(s_key, user_id)
         else:
             st.info("No daily planner slots marked completed today.")
 
