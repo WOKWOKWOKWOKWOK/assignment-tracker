@@ -683,15 +683,7 @@ def restore_single_assignment(row_dict: Dict[str, Any]):
             elif "status_sel" in key:
                 st.session_state[key] = prev_st
 
-    safe_rerun()"""
-📚 Assignment Tracker — Part 2 of 3 (Complete Unabridged Code)
-Includes:
-- System Config Handlers (Courses, Schedules, Priority & Daily Limits)
-- Authentication & Session Handlers
-- Event Callbacks & Restoration Logic
-- AI Time-Slot Scheduler Engine
-- Terminal Auth Interface Renderer
-"""
+    safe_rerun()
 
 # -----------------------
 # System Config CRUD Handlers
@@ -1274,15 +1266,6 @@ def render_terminal_auth_page():
                         safe_rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)"""
-📚 Assignment Tracker — Part 3 of 3 (Complete Unabridged Code)
-Includes:
-- Dialog Modals (Add, Edit, Courses Setup, Priority Config)
-- Main App Header & Toolbar
-- Main Assignment Grid Filtering (hides 'Done' tasks)
-- Weekly Schedule & AI Time-Slot Planner View
-- Completed & Recovery Center View
-"""
-
 # -----------------------
 # Modal Dialogs
 # -----------------------
