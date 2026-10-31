@@ -1,10 +1,5 @@
 """
-📚 Assignment Tracker — Complete & Fixed Edition
-Includes:
-- Main tab filtering: Done tasks move to Completed & Recovery immediately.
-- Automatic unchecking: Restored tasks reset their checkbox and return to previous status.
-- Auto-purge post due date: Completed items clear automatically after their due date passes.
-- Database-backed daily slot persistence & midnight reset.
+📚 Assignment Tracker — Complete & Fixed Edition with Custom Logo
 """
 
 from __future__ import annotations
@@ -36,7 +31,7 @@ def get_local_now() -> datetime:
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
-    page_icon="📚",
+    page_icon="📑",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -114,9 +109,7 @@ st.markdown(
     .app-title {
         font-size: 1.7rem;
         font-weight: 800;
-        background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #ffffff;
         letter-spacing: -0.03em;
         margin: 0;
     }
@@ -1204,10 +1197,19 @@ def render_terminal_auth_page():
 
     with c_center:
         st.markdown(
-            "<div style='background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px 28px; text-align: center; margin-bottom: 20px; backdrop-filter: blur(12px); shadow: 0 10px 30px rgba(0,0,0,0.5);'>"
-            "<div style='font-size: 1.9rem; font-weight: 800; color: #ffffff; letter-spacing: -0.03em;'>📚 Assignment Tracker</div>"
-            "<div style='font-size: 0.85rem; color: #64748b; margin-top: 4px;'>Simsbury High School Portal</div>"
-            "</div>",
+            """
+            <div style='background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px 28px; text-align: center; margin-bottom: 20px; backdrop-filter: blur(12px); box-shadow: 0 10px 30px rgba(0,0,0,0.5);'>
+                <div style='display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom: 4px;'>
+                    <svg width='34' height='34' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
+                        <rect x='2' y='3' width='12' height='12' rx='2' fill='white' opacity='0.5'/>
+                        <rect x='6' y='7' width='12' height='12' rx='2' fill='white' opacity='0.8'/>
+                        <rect x='10' y='11' width='12' height='12' rx='2' fill='white'/>
+                    </svg>
+                    <span style='font-size: 1.9rem; font-weight: 800; color: #ffffff; letter-spacing: -0.03em;'>Assignment Tracker</span>
+                </div>
+                <div style='font-size: 0.85rem; color: #64748b;'>Simsbury High School Portal</div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
@@ -1624,7 +1626,19 @@ col_header_left, col_header_right = st.columns([2.2, 2.8])
 
 with col_header_left:
     st.markdown(
-        f"<div style='margin-bottom:6px;'><div class='app-title'>📚 Assignment Tracker</div><div class='app-subtitle'>{email} &bull; <span style='color:#818cf8;'>System: {user_prio_mode}</span></div></div>",
+        f"""
+        <div style='margin-bottom:6px;'>
+            <div style='display:flex; align-items:center; gap:10px;'>
+                <svg width='30' height='30' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
+                    <rect x='2' y='3' width='12' height='12' rx='2' fill='white' opacity='0.5'/>
+                    <rect x='6' y='7' width='12' height='12' rx='2' fill='white' opacity='0.8'/>
+                    <rect x='10' y='11' width='12' height='12' rx='2' fill='white'/>
+                </svg>
+                <span class='app-title' style='line-height:1;'>Assignment Tracker</span>
+            </div>
+            <div class='app-subtitle' style='margin-top:4px;'>{email} &bull; <span style='color:#818cf8;'>System: {user_prio_mode}</span></div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
