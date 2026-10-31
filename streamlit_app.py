@@ -1,9 +1,10 @@
 """
-📚 Assignment Tracker — Part 1 of 3 (Complete Unabridged Code)
+📚 Assignment Tracker — Complete & Fixed Edition
 Includes:
-- Full Glassmorphism & Mobile CSS
-- Database CRUD & Auto-Purge past due date
-- State Handlers & Restored Un-check Logic
+- Main tab filtering: Done tasks move to Completed & Recovery immediately.
+- Automatic unchecking: Restored tasks reset their checkbox and return to previous status.
+- Auto-purge post due date: Completed items clear automatically after their due date passes.
+- Database-backed daily slot persistence & midnight reset.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ def get_local_now() -> datetime:
 
 
 # -----------------------
-# Streamlit Page Config & Professional CSS Overrides
+# Streamlit Page Config & Custom Styling
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
@@ -45,7 +46,6 @@ st.markdown(
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
-    /* Canvas & Global Typography */
     html, body, .stApp {
         background-color: #070a12 !important;
         background-image: 
@@ -61,12 +61,10 @@ st.markdown(
         max-width: 1420px;
     }
 
-    /* Hide Chrome Elements */
     #MainMenu, header, footer {visibility: hidden;}
     div[data-testid="stToolbar"], div[data-testid="stDecoration"], div[data-testid="stStatusWidget"] {display: none !important;}
     section[data-testid="stSidebar"], div[data-testid="collapsedControl"], button[data-testid="stSidebarCollapseButton"] {display: none !important;}
 
-    /* Modern Responsive Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 6px;
         background-color: rgba(15, 23, 42, 0.6);
@@ -97,7 +95,6 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
     }
 
-    /* Card Containers & Glassmorphism */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background: rgba(15, 23, 42, 0.75) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -114,7 +111,6 @@ st.markdown(
         box-shadow: 0 10px 30px rgba(99, 102, 241, 0.15);
     }
 
-    /* App Header Banner */
     .app-title {
         font-size: 1.7rem;
         font-weight: 800;
@@ -145,7 +141,6 @@ st.markdown(
         box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
     }
 
-    /* Badges & Priority Pills */
     .prio-high {
         background: rgba(244, 63, 94, 0.15);
         color: #fb7185;
@@ -176,7 +171,6 @@ st.markdown(
         font-weight: 700;
     }
 
-    /* AI Day Card & Time Metrics */
     .ai-day-card {
         background: rgba(15, 23, 42, 0.85);
         border: 1px solid #1e293b;
@@ -230,7 +224,6 @@ st.markdown(
         font-weight: 700;
     }
 
-    /* Toast Notification */
     .undo-toast-box {
         position: relative;
         background-color: #0f172a;
@@ -259,7 +252,6 @@ st.markdown(
         to { width: 0%; }
     }
 
-    /* Recovery Item Card */
     .recovery-card {
         background: rgba(30, 41, 59, 0.5);
         border: 1px solid rgba(255, 255, 255, 0.08);
@@ -271,7 +263,6 @@ st.markdown(
         justify-content: space-between;
     }
 
-    /* Mobile Responsive Overrides */
     @media (max-width: 768px) {
         .main .block-container {
             padding-top: 0.6rem !important;
@@ -556,136 +547,6 @@ def _hash_pw(password: str) -> str:
 
 
 # -----------------------
-# Database CRUD Operations & Persistence Handlers
-# -----------------------
-def invalidate_cache():
-    if "df_cached" in st.session_state:
-        del st.session_state["df_cached"]
-
-
-def fetch_assignments(user_id: str) -> pd.DataFrame:
-    """
-    Fetches assignments from the database.
-    Automatically purges completed ('Done') assignments whose due date has passed.
-    """
-    today_iso = get_local_now().date().isoformat()
-
-    sql_purge_expired = text("""
-        DELETE FROM assignments
-        WHERE user_id = :uid
-          AND status = 'Done'
-          AND due_date IS NOT NULL
-          AND due_date != ''
-          AND due_date < :today_iso;
-    """)
-
-    sql_fetch = text("""
-        SELECT * FROM assignments 
-        WHERE user_id = :uid 
-          AND title NOT IN (
-            '__SYSTEM_COURSES__', 
-            '__SYSTEM_SCHEDULE__', 
-            '__SYSTEM_PRIO_CONFIG__', 
-            '__SYSTEM_MAX_WORK_CONFIG__', 
-            '__SYSTEM_COMPLETED_SLOTS__'
-          )
-    """)
-
-    with engine.begin() as conn:
-        conn.execute(sql_purge_expired, {"uid": user_id, "today_iso": today_iso})
-        df = pd.read_sql(sql_fetch, conn, params={"uid": user_id})
-
-    if df.empty:
-        return pd.DataFrame(columns=[
-            "id", "user_id", "title", "course", "due_date", "status", "priority",
-            "atype", "eta", "created_at", "notes", "prev_status"
-        ])
-
-    rows = []
-    for _, r in df.iterrows():
-        n_text, prev_st = _unpack_notes(r.get("notes"))
-        rows.append({
-            "id": str(r.get("id")),
-            "user_id": str(r.get("user_id")),
-            "title": str(r.get("title") or ""),
-            "course": str(r.get("course") or "GENERAL").strip().upper(),
-            "due_date": str(r.get("due_date") or ""),
-            "status": str(r.get("status") or "Not Started"),
-            "priority": priority_to_int(r.get("priority")),
-            "atype": str(r.get("atype") or "Homework"),
-            "eta": str(r.get("eta") or ""),
-            "created_at": str(r.get("created_at") or ""),
-            "notes": n_text,
-            "prev_status": prev_st
-        })
-
-    return pd.DataFrame(rows)
-
-
-def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
-    if not rows_to_upsert:
-        return
-
-    sql = text("""
-        INSERT INTO assignments (id, user_id, title, course, due_date, status, priority, atype, eta, notes, created_at)
-        VALUES (:id, :user_id, :title, :course, :due_date, :status, :priority, :atype, :eta, :notes, :created_at)
-        ON CONFLICT (id) DO UPDATE SET
-            user_id = EXCLUDED.user_id,
-            title = EXCLUDED.title,
-            course = EXCLUDED.course,
-            due_date = EXCLUDED.due_date,
-            status = EXCLUDED.status,
-            priority = EXCLUDED.priority,
-            atype = EXCLUDED.atype,
-            eta = EXCLUDED.eta,
-            notes = EXCLUDED.notes,
-            created_at = EXCLUDED.created_at;
-    """)
-
-    with engine.begin() as conn:
-        for row in rows_to_upsert:
-            n_text = str(row.get("notes", "")).strip()
-            prev_st = str(row.get("prev_status", "Not Started"))
-            packed = _pack_notes(n_text, prev_st)
-
-            conn.execute(sql, {
-                "id": str(row.get("id")),
-                "user_id": str(row.get("user_id")),
-                "title": str(row.get("title", "")).strip() or "Untitled Assignment",
-                "course": str(row.get("course", "GENERAL")).strip().upper(),
-                "due_date": str(row.get("due_date") or ""),
-                "status": str(row.get("status", "Not Started")),
-                "priority": priority_to_int(row.get("priority")),
-                "atype": str(row.get("atype", "Homework")),
-                "eta": str(row.get("eta", "")).strip(),
-                "notes": packed,
-                "created_at": str(row.get("created_at") or get_local_now().isoformat())
-            })
-
-    invalidate_cache()
-
-
-def restore_single_assignment(row_dict: Dict[str, Any]):
-    """Restores assignment, unchecks checkbox, and reverts to previous status."""
-    aid = str(row_dict.get("id"))
-    prev_st = row_dict.get("prev_status") or "In Progress"
-    if prev_st == "Done":
-        prev_st = "In Progress"
-    
-    row_dict["status"] = prev_st
-    upsert_assignments([row_dict])
-
-    # Explicitly clear checkbox values & reset dropdown state across all tab views
-    for key in list(st.session_state.keys()):
-        if aid in key:
-            if "chk_done" in key:
-                st.session_state[key] = False
-            elif "status_sel" in key:
-                st.session_state[key] = prev_st
-
-    safe_rerun()
-
-# -----------------------
 # System Config CRUD Handlers
 # -----------------------
 def _read_courses_file(user_id: str) -> List[str]:
@@ -866,11 +727,142 @@ def _write_completed_slots(user_id: str, today_slots: Dict[str, Dict[str, Any]])
         })
 
 
+# -----------------------
+# Database CRUD Operations & Auto-Purge
+# -----------------------
+def invalidate_cache():
+    if "df_cached" in st.session_state:
+        del st.session_state["df_cached"]
+
+
+def fetch_assignments(user_id: str) -> pd.DataFrame:
+    """
+    Fetches assignments from the database.
+    Automatically purges completed ('Done') assignments whose due date has passed.
+    """
+    today_iso = get_local_now().date().isoformat()
+
+    sql_purge_expired = text("""
+        DELETE FROM assignments
+        WHERE user_id = :uid
+          AND status = 'Done'
+          AND due_date IS NOT NULL
+          AND due_date != ''
+          AND due_date < :today_iso;
+    """)
+
+    sql_fetch = text("""
+        SELECT * FROM assignments 
+        WHERE user_id = :uid 
+          AND title NOT IN (
+            '__SYSTEM_COURSES__', 
+            '__SYSTEM_SCHEDULE__', 
+            '__SYSTEM_PRIO_CONFIG__', 
+            '__SYSTEM_MAX_WORK_CONFIG__', 
+            '__SYSTEM_COMPLETED_SLOTS__'
+          )
+    """)
+
+    with engine.begin() as conn:
+        conn.execute(sql_purge_expired, {"uid": user_id, "today_iso": today_iso})
+        df = pd.read_sql(sql_fetch, conn, params={"uid": user_id})
+
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "id", "user_id", "title", "course", "due_date", "status", "priority",
+            "atype", "eta", "created_at", "notes", "prev_status"
+        ])
+
+    rows = []
+    for _, r in df.iterrows():
+        n_text, prev_st = _unpack_notes(r.get("notes"))
+        rows.append({
+            "id": str(r.get("id")),
+            "user_id": str(r.get("user_id")),
+            "title": str(r.get("title") or ""),
+            "course": str(r.get("course") or "GENERAL").strip().upper(),
+            "due_date": str(r.get("due_date") or ""),
+            "status": str(r.get("status") or "Not Started"),
+            "priority": priority_to_int(r.get("priority")),
+            "atype": str(r.get("atype") or "Homework"),
+            "eta": str(r.get("eta") or ""),
+            "created_at": str(r.get("created_at") or ""),
+            "notes": n_text,
+            "prev_status": prev_st
+        })
+
+    return pd.DataFrame(rows)
+
+
+def upsert_assignments(rows_to_upsert: List[Dict[str, Any]]) -> None:
+    if not rows_to_upsert:
+        return
+
+    sql = text("""
+        INSERT INTO assignments (id, user_id, title, course, due_date, status, priority, atype, eta, notes, created_at)
+        VALUES (:id, :user_id, :title, :course, :due_date, :status, :priority, :atype, :eta, :notes, :created_at)
+        ON CONFLICT (id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            title = EXCLUDED.title,
+            course = EXCLUDED.course,
+            due_date = EXCLUDED.due_date,
+            status = EXCLUDED.status,
+            priority = EXCLUDED.priority,
+            atype = EXCLUDED.atype,
+            eta = EXCLUDED.eta,
+            notes = EXCLUDED.notes,
+            created_at = EXCLUDED.created_at;
+    """)
+
+    with engine.begin() as conn:
+        for row in rows_to_upsert:
+            n_text = str(row.get("notes", "")).strip()
+            prev_st = str(row.get("prev_status", "Not Started"))
+            packed = _pack_notes(n_text, prev_st)
+
+            conn.execute(sql, {
+                "id": str(row.get("id")),
+                "user_id": str(row.get("user_id")),
+                "title": str(row.get("title", "")).strip() or "Untitled Assignment",
+                "course": str(row.get("course", "GENERAL")).strip().upper(),
+                "due_date": str(row.get("due_date") or ""),
+                "status": str(row.get("status", "Not Started")),
+                "priority": priority_to_int(row.get("priority")),
+                "atype": str(row.get("atype", "Homework")),
+                "eta": str(row.get("eta", "")).strip(),
+                "notes": packed,
+                "created_at": str(row.get("created_at") or get_local_now().isoformat())
+            })
+
+    invalidate_cache()
+
+
 def delete_assignment(assignment_id: str) -> None:
     sql = text("DELETE FROM assignments WHERE id = :id")
     with engine.begin() as conn:
         conn.execute(sql, {"id": assignment_id})
     invalidate_cache()
+
+
+def restore_single_assignment(row_dict: Dict[str, Any]):
+    """Restores assignment, unchecks checkbox, and reverts to previous status."""
+    aid = str(row_dict.get("id"))
+    prev_st = row_dict.get("prev_status") or "In Progress"
+    if prev_st == "Done":
+        prev_st = "In Progress"
+    
+    row_dict["status"] = prev_st
+    upsert_assignments([row_dict])
+
+    # Uncheck checkboxes and reset dropdowns across all tab views in session state
+    for key in list(st.session_state.keys()):
+        if aid in key:
+            if "chk_done" in key:
+                st.session_state[key] = False
+            elif "status_sel" in key:
+                st.session_state[key] = prev_st
+
+    safe_rerun()
 
 
 # -----------------------
@@ -1266,6 +1258,98 @@ def render_terminal_auth_page():
                         safe_rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)
+
+
+# -----------------------
+# Grid Renderer Component
+# -----------------------
+def render_assignment_grid(df_grid: pd.DataFrame, user_prio_mode: str, key_prefix: str = "reg_"):
+    if df_grid.empty:
+        st.markdown("<div style='padding:50px 0; text-align:center; color:#475569; font-size:0.9rem;'>No active assignments in this view.</div>", unsafe_allow_html=True)
+        return
+
+    df_sorted = df_grid.copy()
+    df_sorted["due_parsed"] = df_sorted["due_date"].apply(parse_date_iso_or_empty)
+    df_sorted = df_sorted.sort_values(by=["due_parsed", "priority"], ascending=[True, False]).drop(columns=["due_parsed"])
+
+    cards_per_row = 3
+    chunked_rows = [df_sorted.iloc[i:i + cards_per_row] for i in range(0, len(df_sorted), cards_per_row)]
+
+    for row_df in chunked_rows:
+        cols = st.columns(cards_per_row)
+        for idx, (_, row) in enumerate(row_df.iterrows()):
+            with cols[idx]:
+                with st.container(border=True):
+                    aid = row.get("id")
+                    title = row.get("title") or "Untitled"
+                    course = (row.get("course") or "MATH").upper()
+                    atype = row.get("atype") or "Homework"
+                    due_d = parse_date_iso_or_empty(row.get("due_date"))
+                    due_text = format_mdy(due_d)
+                    days_text, _ = days_left(due_d)
+
+                    chk_key = f"{key_prefix}chk_done_{aid}"
+                    sel_key = f"{key_prefix}status_sel_{aid}"
+
+                    status = st.session_state.get(sel_key) or row.get("status") or "Not Started"
+                    prio_num = priority_to_int(row.get("priority"))
+                    prio_label = priority_to_label(prio_num)
+                    prio_cls = f"prio-{prio_label.lower()}"
+                    prio_display_str = format_priority_display(prio_num, user_prio_mode)
+                    row_dict = row.to_dict()
+
+                    # Top Header Controls
+                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.8, 1.1, 2.3])
+
+                    with c_top1:
+                        st.checkbox(
+                            "Done",
+                            value=(status == "Done"),
+                            key=chk_key,
+                            label_visibility="collapsed",
+                            on_change=on_checkbox_toggle,
+                            args=(aid, row_dict, chk_key, sel_key)
+                        )
+
+                    with c_top2:
+                        st.markdown(get_course_badge_html(course), unsafe_allow_html=True)
+
+                    with c_top3:
+                        if st.button("Edit", key=f"{key_prefix}edit_btn_{aid}"):
+                            st.session_state["_edit_assignment_id"] = aid
+                            safe_rerun()
+
+                    with c_top4:
+                        st.selectbox(
+                            "Status",
+                            STATUS_OPTIONS,
+                            index=STATUS_OPTIONS.index(status) if status in STATUS_OPTIONS else 0,
+                            key=sel_key,
+                            label_visibility="collapsed",
+                            on_change=on_status_change,
+                            args=(aid, row_dict, sel_key, chk_key)
+                        )
+
+                    st.markdown(f"<div style='font-size:1.15rem; font-weight:700; color:#f8fafc; margin-top:10px;'>{title}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color:#64748b; font-size:0.8rem; margin-top:2px; margin-bottom:12px;'>{atype}</div>", unsafe_allow_html=True)
+
+                    eta = str(row.get("eta") or "").strip()
+                    notes = str(row.get("notes") or "").strip()
+                    eta_snippet = f" &bull; Est: {eta}" if eta else ""
+
+                    st.markdown(
+                        f"<div style='display:flex; align-items:center; justify-content:space-between; margin-top:10px; margin-bottom:12px; padding-top:10px; border-top:1px solid rgba(255, 255, 255, 0.08);'>"
+                        f"<div style='font-size:0.78rem; color:#94a3b8;'>Due {due_text} <span style='color:#64748b;'>({days_text})</span>{eta_snippet}</div>"
+                        f"<div class='{prio_cls}'>Priority: {prio_display_str}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+
+                    if notes:
+                        note_preview = notes if len(notes) <= 90 else notes[:87] + "..."
+                        st.markdown(f"<div style='font-size:0.75rem; color:#64748b; margin-top:4px; margin-bottom:8px;'>Note: {note_preview}</div>", unsafe_allow_html=True)
+
+
 # -----------------------
 # Modal Dialogs
 # -----------------------
@@ -1657,7 +1741,11 @@ with tab_schedule:
                         _write_schedule_file(user_id, user_schedule)
                         safe_rerun()
 
-   # Real-time JS-driven Undo Toast with Animated Progress Bar
+    with col_sched_right:
+        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f8fafc;'>AI Daily Action Plan</div>", unsafe_allow_html=True)
+        st.caption("Optimized timeline across available days based on due dates & priority.")
+
+        # Real-time JS-driven Undo Toast with Animated Progress Bar
         undo_state = st.session_state.get("_undo_slot_state")
         if undo_state:
             elapsed = (get_local_now() - undo_state["time"]).total_seconds()
@@ -1687,17 +1775,6 @@ with tab_schedule:
                 components.html(js_trigger, height=0)
             else:
                 del st.session_state["_undo_slot_state"]
-               # Replace this section in tab_schedule:
-js_trigger = (
-    "<script>\n"
-    "setTimeout(function() {\n"
-    "    window.parent.postMessage({type: 'streamlit:rerun'}, '*');\n"
-    f"}}, {int(remaining_sec * 1000)});\n"
-    "</script>"
-)
-components.html(js_trigger, height=0)
-            else:
-                del st.session_state["_undo_slot_state"]
 
         ctrl_col1, ctrl_col2 = st.columns([1.5, 1.2])
 
@@ -1707,7 +1784,6 @@ components.html(js_trigger, height=0)
         with ctrl_col2:
             show_time_slots = st.toggle("Show Time Slots", value=True, key="toggle_show_time_slots")
 
-        # Per-Day Max Work Limit Expander Controller
         with st.expander("⏱️ Customize Daily Work Limits (Per Day)", expanded=False):
             st.caption("Set maximum allowed study/work time independently for each day of the week:")
             opts = [0, 15, 30, 45, 60, 90, 120, 150, 180, 210, 240, 300]
