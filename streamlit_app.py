@@ -1,14 +1,12 @@
 """
-Assignment Tracker — 📚 Recovery & Auto-Cleanup Edition
-Fixes & Enhancements:
-- Main Tab Filtering: Tasks marked "Done" immediately disappear from the main 
-  Assignments, Tests & Quizzes, and Other tabs so active views stay clean.
-- Automatic Post-Due-Date Purge: Completed assignments remain safely stored in 
-  the Completed & Recovery tab until their due date passes, after which they 
-  automatically clear. The manual "Clear Completed" button has been removed.
-- Full Restoration: Restoring a task from the Completed & Recovery tab brings 
-  it straight back into its original assignment tab with its previous status intact.
-- Persistent Daily AI Planner Slots & Midnight Reset.
+Assignment Tracker — 📚 Instant Un-Check & State Recovery Edition
+Fixes:
+- Widget State Reset on Restore: Explicitly clears and unchecks Streamlit's stored 
+  session state checkbox and dropdown values when restoring items from the Completed 
+  & Recovery tab, ensuring tasks return immediately to their un-checked previous status.
+- Filtered Active Tabs: Completed tasks vanish from active tabs and remain in 
+  Recovery until their due date passes (after which they auto-clear).
+- Database-Backed Daily AI Planner Slot Persistence & Midnight Reset.
 """
 
 from __future__ import annotations
@@ -981,11 +979,25 @@ def restore_single_daily_slot(slot_key: str, user_id: str):
 
 
 def restore_single_assignment(row_dict: Dict[str, Any]):
+    aid = str(row_dict.get("id"))
     prev_st = row_dict.get("prev_status") or "In Progress"
     if prev_st == "Done":
         prev_st = "In Progress"
     row_dict["status"] = prev_st
     upsert_assignments([row_dict])
+
+    # Reset UI widget session state keys so the task renders completely un-checked
+    for prefix in ["reg_", "tests_", "other_"]:
+        chk_key = f"{prefix}chk_done_{aid}"
+        sel_key = f"{prefix}status_sel_{aid}"
+        if chk_key in st.session_state:
+            st.session_state[chk_key] = False
+        if sel_key in st.session_state:
+            st.session_state[sel_key] = prev_st
+
+    if f"prev_st_{aid}" in st.session_state:
+        st.session_state[f"prev_st_{aid}"] = prev_st
+
     safe_rerun()
 
 
@@ -1603,349 +1615,4 @@ if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
 
 if st.session_state.get("_show_welcome_courses_modal", False):
-    show_welcome_courses_dialog(user_id)
-
-if st.session_state.get("_show_prio_config_modal", False):
-    show_prio_config_dialog(user_id)
-
-if st.session_state.get("_open_add_modal", False):
-    show_add_assignment_dialog(user_id, user_prio_mode)
-
-if st.session_state.get("_edit_assignment_id"):
-    show_edit_assignment_dialog(user_id, st.session_state["_edit_assignment_id"], user_prio_mode)
-
-if st.session_state.get("_open_manage_courses", False):
-    show_manage_courses_dialog(user_id)
-
-
-# -----------------------
-# Main App Header
-# -----------------------
-col_header_left, col_header_right = st.columns([2.2, 2.8])
-
-with col_header_left:
-    st.markdown(
-        f"<div style='margin-bottom:6px;'><div class='app-title'>📚 Assignment Tracker</div><div class='app-subtitle'>{email} &bull; <span style='color:#818cf8;'>System: {user_prio_mode}</span></div></div>",
-        unsafe_allow_html=True,
-    )
-
-with col_header_right:
-    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1.1, 1.1, 1.1, 0.9])
-    with btn_col1:
-        if st.button("New Task", key="toolbar_add", use_container_width=True):
-            st.session_state["_open_add_modal"] = True
-            safe_rerun()
-    with btn_col2:
-        if st.button("Courses", key="toolbar_courses", use_container_width=True):
-            st.session_state["_open_manage_courses"] = True
-            safe_rerun()
-    with btn_col3:
-        if st.button("Priority View", key="toolbar_prio_sys", use_container_width=True):
-            st.session_state["_show_prio_config_modal"] = True
-            safe_rerun()
-    with btn_col4:
-        if st.button("Sign Out", key="toolbar_signout", use_container_width=True):
-            sign_out_user()
-
-today_str = get_local_now().strftime("%A, %B %d, %Y")
-st.markdown(
-    f'<div class="date-banner">Today\'s Date: {today_str}</div>',
-    unsafe_allow_html=True,
-)
-
-if "df_cached" not in st.session_state:
-    st.session_state.df_cached = fetch_assignments(user_id)
-
-df_all = st.session_state.df_cached.copy()
-
-# -----------------------
-# Navigation Tabs
-# -----------------------
-tab_assignments, tab_tests, tab_other, tab_schedule, tab_completed = st.tabs([
-    "Assignments", 
-    "Tests & Quizzes", 
-    "Other",
-    "Weekly Schedule & AI Planner",
-    "Completed & Recovery"
-])
-
-# TAB 1: Regular Assignments (Filters out 'Done' tasks so completed items disappear)
-with tab_assignments:
-    df_regular = df_all[
-        (df_all["status"] != "Done") & 
-        (df_all["atype"] != "Test & Quizzes") & 
-        (df_all["atype"] != "Other") & 
-        (df_all["course"] != "OTHER")
-    ]
-    render_assignment_grid(df_regular, user_prio_mode, key_prefix="reg_")
-
-# TAB 2: Tests & Quizzes Only (Filters out 'Done' tasks)
-with tab_tests:
-    df_tests = df_all[
-        (df_all["status"] != "Done") & 
-        (df_all["atype"] == "Test & Quizzes")
-    ]
-    render_assignment_grid(df_tests, user_prio_mode, key_prefix="tests_")
-
-# TAB 3: Dedicated "Other" Tasks Section (Filters out 'Done' tasks)
-with tab_other:
-    df_other = df_all[
-        (df_all["status"] != "Done") & 
-        ((df_all["atype"] == "Other") | (df_all["course"] == "OTHER"))
-    ]
-    render_assignment_grid(df_other, user_prio_mode, key_prefix="other_")
-
-# TAB 4: Weekly Schedule & AI Time-Slot Planner
-with tab_schedule:
-    col_sched_left, col_sched_right = st.columns([1.2, 1.8])
-
-    user_schedule = _read_schedule_file(user_id)
-
-    with col_sched_left:
-        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f8fafc;'>Weekly Commitments</div>", unsafe_allow_html=True)
-        st.caption("Enter recurring busy blocks so the AI plans around them.")
-
-        with st.form("add_schedule_event_form"):
-            s_day = st.selectbox("Day of Week", DAYS_OF_WEEK)
-            s_title = st.text_input("Event Name", placeholder="e.g. Robotics, Practice")
-            c_time1, c_time2 = st.columns(2)
-            with c_time1:
-                s_start_raw = st.text_input("Start Time", value="3:30 PM", key="sched_start_input")
-            with c_time2:
-                s_end_raw = st.text_input("End Time", value="5:00 PM", key="sched_end_input")
-
-            if st.form_submit_button("Add Block", use_container_width=True):
-                st_time = parse_time_str(s_start_raw)
-                end_time = parse_time_str(s_end_raw)
-                if s_title.strip() and st_time and end_time:
-                    formatted_start = st_time.strftime("%I:%M %p").lstrip("0")
-                    formatted_end = end_time.strftime("%I:%M %p").lstrip("0")
-                    user_schedule.append({
-                        "id": str(uuid.uuid4()),
-                        "day": s_day,
-                        "title": s_title.strip(),
-                        "start": formatted_start,
-                        "end": formatted_end
-                    })
-                    _write_schedule_file(user_id, user_schedule)
-                    safe_rerun()
-
-        st.markdown("---")
-        if user_schedule:
-            for idx, item in enumerate(user_schedule):
-                col_item_a, col_item_b = st.columns([4, 1])
-                with col_item_a:
-                    st.markdown(f"<span style='color:#cbd5e1; font-size:0.82rem;'>**{item.get('day')}**: {item.get('title')} ({item.get('start')} - {item.get('end')})</span>", unsafe_allow_html=True)
-                with col_item_b:
-                    if st.button("Remove", key=f"del_sched_{idx}"):
-                        user_schedule.pop(idx)
-                        _write_schedule_file(user_id, user_schedule)
-                        safe_rerun()
-
-    with col_sched_right:
-        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f8fafc;'>AI Daily Action Plan</div>", unsafe_allow_html=True)
-        st.caption("Optimized timeline across available days based on due dates & priority.")
-
-        # Real-time JS-driven Undo Toast with Animated Progress Bar
-        undo_state = st.session_state.get("_undo_slot_state")
-        if undo_state:
-            elapsed = (get_local_now() - undo_state["time"]).total_seconds()
-            remaining_sec = max(0, 15 - elapsed)
-
-            if remaining_sec > 0:
-                u_col1, u_col2 = st.columns([4.2, 1])
-                with u_col1:
-                    st.markdown(
-                        f"<div class='undo-toast-box'>"
-                        f"<span style='font-size: 0.85rem; color: #f8fafc;'>Finished <b>{undo_state['title']}</b> for today</span>"
-                        f"<div class='undo-progress-bar' style='animation-duration: {remaining_sec}s;'></div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-                with u_col2:
-                    if st.button("Undo", key="btn_undo_slot", on_click=on_undo_daily_slot, args=(user_id,), use_container_width=True):
-                        safe_rerun()
-
-                components.html(
-                    f"""
-                    <script>
-                        setTimeout(function() {{
-                            window.parent.postMessage({{type: 'streamlit:rerun'}}, '*');
-                        }}, {int(remaining_sec * 1000)});
-                    </script>
-                    """,
-                    height=0,
-                )
-            else:
-                del st.session_state["_undo_slot_state"]
-
-        ctrl_col1, ctrl_col2 = st.columns([1.5, 1.2])
-
-        with ctrl_col1:
-            gen_plan_click = st.button("Re-Calculate Plan", key="btn_gen_ai_plan", use_container_width=True)
-
-        with ctrl_col2:
-            show_time_slots = st.toggle("Show Time Slots", value=True, key="toggle_show_time_slots")
-
-        # Per-Day Max Work Limit Expander Controller
-        with st.expander("⏱️ Customize Daily Work Limits (Per Day)", expanded=False):
-            st.caption("Set maximum allowed study/work time independently for each day of the week:")
-            opts = [0, 15, 30, 45, 60, 90, 120, 150, 180, 210, 240, 300]
-            
-            day_cols = st.columns(7)
-            new_limits_dict = {}
-            
-            for d_idx, d_name in enumerate(DAYS_OF_WEEK):
-                with day_cols[d_idx]:
-                    cur_val = stored_max_daily_work_dict.get(d_name, 60)
-                    cur_idx = opts.index(cur_val) if cur_val in opts else 4
-                    val = st.selectbox(
-                        d_name[:3],
-                        options=opts,
-                        index=cur_idx,
-                        key=f"p_limit_{d_name}",
-                        format_func=lambda x: f"{x}m"
-                    )
-                    new_limits_dict[d_name] = val
-
-            if new_limits_dict != stored_max_daily_work_dict:
-                _write_max_work_config(user_id, new_limits_dict)
-                if "_ai_plan_result" in st.session_state:
-                    del st.session_state["_ai_plan_result"]
-                safe_rerun()
-
-        fresh_assignments = fetch_assignments(user_id)
-
-        if gen_plan_click:
-            st.session_state["_ai_plan_result"] = generate_ai_study_plan(
-                fresh_assignments, user_schedule, max_daily_mins_config=stored_max_daily_work_dict
-            )
-
-        plan_res = st.session_state.get("_ai_plan_result") or generate_ai_study_plan(
-            fresh_assignments, user_schedule, max_daily_mins_config=stored_max_daily_work_dict
-        )
-
-        status = plan_res.get("status")
-        plan = plan_res.get("plan", {})
-
-        if status == "no_tasks":
-            st.info("No active assignments. Add items in the 'Assignments', 'Tests & Quizzes', or 'Other' tab.")
-        elif status == "all_done":
-            st.success("All assignments marked completed!")
-        elif status == "success" and plan:
-            completed_slots_today = _read_completed_slots(user_id)
-            completed_set = set(completed_slots_today.keys())
-
-            for day_name, day_data in plan.items():
-                if not isinstance(day_data, dict):
-                    st.session_state["_ai_plan_result"] = generate_ai_study_plan(
-                        fresh_assignments, user_schedule, max_daily_mins_config=stored_max_daily_work_dict
-                    )
-                    safe_rerun()
-                    break
-
-                raw_slots = day_data.get("slots", [])
-                visible_slots = [s for s in raw_slots if s.get("slot_key") not in completed_set]
-
-                day_cap_mins = stored_max_daily_work_dict.get(day_name, 60)
-                scheduled_mins = sum(s.get("eta_mins", 0) for s in visible_slots)
-                
-                sched_formatted = format_mins_to_hrs_mins(scheduled_mins)
-                max_formatted = format_mins_to_hrs_mins(day_cap_mins)
-
-                st.markdown(
-                    f'<div class="ai-day-card">'
-                    f'<div class="ai-day-header">'
-                    f'<span class="ai-day-title">{day_name}</span>'
-                    f'<div class="day-time-badge">{sched_formatted} scheduled <span class="time-max-cap">/ Max {max_formatted}</span></div>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-
-                busy_list = day_data.get("busy", [])
-                if busy_list:
-                    st.caption("Busy: " + ", ".join(busy_list))
-
-                if visible_slots:
-                    for idx_slot, s in enumerate(visible_slots):
-                        s_key = s.get("slot_key")
-                        slot_prio_str = format_priority_display(s.get("priority"), user_prio_mode)
-                        slot_duration_str = format_mins_to_hrs_mins(s.get("eta_mins", 0))
-
-                        c_chk, c_text = st.columns([0.35, 7.65])
-                        with c_chk:
-                            chk_widget_key = f"chk_{s_key}_{idx_slot}"
-                            st.checkbox(
-                                "Done Today",
-                                value=False,
-                                key=chk_widget_key,
-                                label_visibility="collapsed",
-                                on_change=on_daily_slot_check,
-                                args=(s_key, s["title"], s, user_id)
-                            )
-
-                        with c_text:
-                            if show_time_slots:
-                                st.markdown(
-                                    f"<span class='slot-badge'>{s['time']}</span> — <b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio_str} ({slot_duration_str})</span>",
-                                    unsafe_allow_html=True
-                                )
-                            else:
-                                st.markdown(
-                                    f"<b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio_str} ({slot_duration_str})</span>",
-                                    unsafe_allow_html=True
-                                )
-                else:
-                    st.markdown("<span style='color:#64748b; font-size:0.82rem;'>No work scheduled for this day. Free time!</span>", unsafe_allow_html=True)
-
-                st.markdown('</div>', unsafe_allow_html=True)
-
-# TAB 5: Completed Items & Recovery Tab
-with tab_completed:
-    st.markdown("<div style='font-weight:800; font-size:1.2rem; color:#f8fafc; margin-bottom:4px;'>Completed Tasks & Recovery Center</div>", unsafe_allow_html=True)
-    st.caption("Finished assignments stay here until their due date passes. Restoring an item returns it to your active tab with its previous status.")
-
-    rec_col1, rec_col2 = st.columns(2)
-
-    with rec_col1:
-        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#38bdf8; margin-bottom:12px;'>1. Daily Planner Slots Checked Today</div>", unsafe_allow_html=True)
-        completed_slots_dict = _read_completed_slots(user_id)
-
-        if completed_slots_dict:
-            for s_key, s_data in list(completed_slots_dict.items()):
-                c_info, c_act = st.columns([4, 1.4])
-                with c_info:
-                    st.markdown(
-                        f"<div class='recovery-card'>"
-                        f"<div><b style='color:#f8fafc;'>{s_data.get('title')}</b> {get_course_badge_html(s_data.get('course'))}"
-                        f"<div style='font-size:0.76rem; color:#94a3b8; margin-top:2px;'>{s_data.get('day_name')} &bull; {s_data.get('time')}</div></div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-                with c_act:
-                    if st.button("Restore to Planner", key=f"rec_slot_{s_key}", use_container_width=True):
-                        restore_single_daily_slot(s_key, user_id)
-        else:
-            st.info("No daily planner slots marked completed today.")
-
-    with rec_col2:
-        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#fbbf24; margin-bottom:12px;'>2. Finished Assignments (Database)</div>", unsafe_allow_html=True)
-        df_done_db = df_all[df_all["status"] == "Done"].copy()
-
-        if not df_done_db.empty:
-            for _, r_done in df_done_db.iterrows():
-                r_aid = r_done.get("id")
-                c_info_db, c_act_db = st.columns([4, 1.4])
-                with c_info_db:
-                    st.markdown(
-                        f"<div class='recovery-card'>"
-                        f"<div><b style='color:#f8fafc;'>{r_done.get('title')}</b> {get_course_badge_html(r_done.get('course'))}"
-                        f"<div style='font-size:0.76rem; color:#94a3b8; margin-top:2px;'>Type: {r_done.get('atype')} &bull; Due: {r_done.get('due_date')}</div></div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-                with c_act_db:
-                    if st.button("Restore Item", key=f"rec_db_{r_aid}", use_container_width=True):
-                        restore_single_assignment(r_done.to_dict())
-        else:
-            st.info("No main database assignments currently marked as 'Done'.")
+    show_welcome_courses_dialog(user_
