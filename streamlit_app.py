@@ -1657,11 +1657,7 @@ with tab_schedule:
                         _write_schedule_file(user_id, user_schedule)
                         safe_rerun()
 
-    with col_sched_right:
-        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#f8fafc;'>AI Daily Action Plan</div>", unsafe_allow_html=True)
-        st.caption("Optimized timeline across available days based on due dates & priority.")
-
-        # Real-time JS-driven Undo Toast with Animated Progress Bar
+   # Real-time JS-driven Undo Toast with Animated Progress Bar
         undo_state = st.session_state.get("_undo_slot_state")
         if undo_state:
             elapsed = (get_local_now() - undo_state["time"]).total_seconds()
@@ -1681,6 +1677,16 @@ with tab_schedule:
                     if st.button("Undo", key="btn_undo_slot", on_click=on_undo_daily_slot, args=(user_id,), use_container_width=True):
                         safe_rerun()
 
+                js_trigger = (
+                    "<script>\n"
+                    "setTimeout(function() {\n"
+                    "    window.parent.postMessage({type: 'streamlit:rerun'}, '*');\n"
+                    f"}}, {int(remaining_sec * 1000)});\n"
+                    "</script>"
+                )
+                components.html(js_trigger, height=0)
+            else:
+                del st.session_state["_undo_slot_state"]
                # Replace this section in tab_schedule:
 js_trigger = (
     "<script>\n"
