@@ -1,12 +1,13 @@
 """
-Assignment Tracker — Auto-Fill & Seamless Auth Edition
-Fixes:
-- Instant Login / Auto-Fill: Wrapped authentication fields in an `st.form` container so browser-saved 
-  credentials submit instantly on click or Enter without needing double-keypresses.
-- Daily Hours & Minutes Breakdown: Displays Total Scheduled Work Time vs. Max Work Capacity 
-  formatted cleanly in hours and minutes.
-- Mobile & Phone Interface Optimization: Responsive media query overrides for small touch screens.
-- Per-Day Custom Work Limits & Dedicated "Other" Tab.
+Assignment Tracker — Recovery & Completed Items Edition
+New Features:
+- Completed & Recovery Tab: Dedicated tab listing all daily planner slots completed today 
+  and all finished assignments from your main database.
+- One-Click Task Restoration: Instantly un-mark accidentally checked items and bring them 
+  back into your active daily AI schedule or main assignment grids.
+- Bulk Recovery Option: "Restore All Completed" button to quickly reactivate all finished work.
+- Formatted Work Metrics: Displays daily scheduled time vs. capacity limits in hours and minutes.
+- Mobile & Phone Responsive UI with Auto-Fill Supported Auth.
 """
 
 from __future__ import annotations
@@ -260,6 +261,18 @@ st.markdown(
     @keyframes countdown-anim {
         from { width: 100%; }
         to { width: 0%; }
+    }
+
+    /* Recovery Item Card */
+    .recovery-card {
+        background: rgba(30, 41, 59, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        padding: 12px 16px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
     }
 
     /* Mobile Responsive Overrides */
@@ -587,7 +600,7 @@ def sign_in_user(email: str, password: str) -> Dict[str, Any]:
 
 
 def sign_out_user() -> None:
-    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_undo_slot_state", "user_prio_mode"]:
+    for key in ["user", "df_cached", "_ai_plan_result", "_completed_daily_slots", "_completed_daily_slots_dict", "_undo_slot_state", "user_prio_mode"]:
         if key in st.session_state:
             del st.session_state[key]
     safe_rerun()
@@ -824,7 +837,7 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 # -----------------------
-# Real-Time Callbacks
+# Real-Time Callbacks & Recovery Handlers
 # -----------------------
 def on_checkbox_toggle(aid: str, row_dict: Dict[str, Any], chk_key: str, sel_key: str):
     chk_val = st.session_state.get(chk_key, False)
@@ -859,10 +872,16 @@ def on_status_change(aid: str, row_dict: Dict[str, Any], sel_key: str, chk_key: 
         safe_rerun()
 
 
-def on_daily_slot_check(slot_key: str, task_title: str):
+def on_daily_slot_check(slot_key: str, task_title: str, slot_dict: Optional[Dict[str, Any]] = None):
     if "_completed_daily_slots" not in st.session_state:
         st.session_state["_completed_daily_slots"] = set()
+    if "_completed_daily_slots_dict" not in st.session_state:
+        st.session_state["_completed_daily_slots_dict"] = {}
+
     st.session_state["_completed_daily_slots"].add(slot_key)
+    if slot_dict:
+        st.session_state["_completed_daily_slots_dict"][slot_key] = slot_dict
+
     st.session_state["_undo_slot_state"] = {
         "slot_key": slot_key,
         "title": task_title,
@@ -876,10 +895,29 @@ def on_undo_daily_slot():
         s_key = undo_info["slot_key"]
         if "_completed_daily_slots" in st.session_state:
             st.session_state["_completed_daily_slots"].discard(s_key)
+        if "_completed_daily_slots_dict" in st.session_state:
+            st.session_state["_completed_daily_slots_dict"].pop(s_key, None)
         for k in list(st.session_state.keys()):
             if s_key in k:
                 st.session_state[k] = False
         del st.session_state["_undo_slot_state"]
+
+
+def restore_single_daily_slot(slot_key: str):
+    if "_completed_daily_slots" in st.session_state:
+        st.session_state["_completed_daily_slots"].discard(slot_key)
+    if "_completed_daily_slots_dict" in st.session_state:
+        st.session_state["_completed_daily_slots_dict"].pop(slot_key, None)
+    safe_rerun()
+
+
+def restore_single_assignment(row_dict: Dict[str, Any]):
+    prev_st = row_dict.get("prev_status") or "In Progress"
+    if prev_st == "Done":
+        prev_st = "In Progress"
+    row_dict["status"] = prev_st
+    upsert_assignments([row_dict])
+    safe_rerun()
 
 
 # -----------------------
@@ -1062,6 +1100,7 @@ def generate_ai_study_plan(
                         plan[day_name]["slots"].append({
                             "slot_key": f"daily_{t['id']}_{day_date.isoformat()}",
                             "task_id": t["id"],
+                            "day_name": day_name,
                             "day_date_str": day_date.isoformat(),
                             "time": f"{start_str} - {end_str}",
                             "title": t["title"],
@@ -1088,7 +1127,7 @@ def generate_ai_study_plan(
 
 
 # -----------------------
-# Terminal Auth Interface (st.form Wrapped for Instant Saved Password Autofill)
+# Terminal Auth Interface
 # -----------------------
 def render_terminal_auth_page():
     c_left, c_center, c_right = st.columns([1, 1.6, 1])
@@ -1484,7 +1523,7 @@ if not active_prio_mode and "_show_prio_config_modal" not in st.session_state:
 
 user_prio_mode = active_prio_mode or "Low / Medium / High"
 
-# State Modal Launchers
+# State Modal Launchers & Sets
 if "_open_add_modal" not in st.session_state:
     st.session_state["_open_add_modal"] = False
 if "_open_manage_courses" not in st.session_state:
@@ -1495,6 +1534,8 @@ if "_edit_assignment_id" not in st.session_state:
     st.session_state["_edit_assignment_id"] = ""
 if "_completed_daily_slots" not in st.session_state:
     st.session_state["_completed_daily_slots"] = set()
+if "_completed_daily_slots_dict" not in st.session_state:
+    st.session_state["_completed_daily_slots_dict"] = {}
 
 if st.session_state.get("_show_welcome_courses_modal", False):
     show_welcome_courses_dialog(user_id)
@@ -1561,13 +1602,14 @@ if "df_cached" not in st.session_state:
 df_all = st.session_state.df_cached.copy()
 
 # -----------------------
-# Navigation Tabs
+# Navigation Tabs (Includes New Recovery Tab)
 # -----------------------
-tab_assignments, tab_tests, tab_other, tab_schedule = st.tabs([
+tab_assignments, tab_tests, tab_other, tab_schedule, tab_completed = st.tabs([
     "Assignments", 
     "Tests & Quizzes", 
     "Other",
-    "Weekly Schedule & AI Planner"
+    "Weekly Schedule & AI Planner",
+    "Completed & Recovery"
 ])
 
 # TAB 1: Regular Assignments
@@ -1777,7 +1819,7 @@ with tab_schedule:
                                 key=chk_widget_key,
                                 label_visibility="collapsed",
                                 on_change=on_daily_slot_check,
-                                args=(s_key, s["title"])
+                                args=(s_key, s["title"], s)
                             )
 
                         with c_text:
@@ -1795,3 +1837,64 @@ with tab_schedule:
                     st.markdown("<span style='color:#64748b; font-size:0.82rem;'>No work scheduled for this day. Free time!</span>", unsafe_allow_html=True)
 
                 st.markdown('</div>', unsafe_allow_html=True)
+
+# TAB 5: Completed Items & Recovery Tab
+with tab_completed:
+    st.markdown("<div style='font-weight:800; font-size:1.2rem; color:#f8fafc; margin-bottom:4px;'>Completed Tasks & Recovery Center</div>", unsafe_allow_html=True)
+    st.caption("Accidentally completed something? Restore items back into your active planner or assignment tabs below.")
+
+    rec_col1, rec_col2 = st.columns(2)
+
+    with rec_col1:
+        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#38bdf8; margin-bottom:12px;'>1. Daily Planner Slots Checked Today</div>", unsafe_allow_html=True)
+        completed_slots_dict = st.session_state.get("_completed_daily_slots_dict", {})
+
+        if completed_slots_dict:
+            for s_key, s_data in list(completed_slots_dict.items()):
+                c_info, c_act = st.columns([4, 1.4])
+                with c_info:
+                    st.markdown(
+                        f"<div class='recovery-card'>"
+                        f"<div><b style='color:#f8fafc;'>{s_data.get('title')}</b> {get_course_badge_html(s_data.get('course'))}"
+                        f"<div style='font-size:0.76rem; color:#94a3b8; margin-top:2px;'>{s_data.get('day_name')} &bull; {s_data.get('time')}</div></div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                with c_act:
+                    if st.button("Restore to Planner", key=f"rec_slot_{s_key}", use_container_width=True):
+                        restore_single_daily_slot(s_key)
+        else:
+            st.info("No daily planner slots marked completed today.")
+
+    with rec_col2:
+        st.markdown("<div style='font-weight:700; font-size:1.05rem; color:#fbbf24; margin-bottom:12px;'>2. Finished Assignments (Database)</div>", unsafe_allow_html=True)
+        df_done_db = df_all[df_all["status"] == "Done"].copy()
+
+        if not df_done_db.empty:
+            if st.button("Restore ALL Completed Assignments", key="rec_all_db_btn", use_container_width=True):
+                rows_to_update = []
+                for _, r in df_done_db.iterrows():
+                    r_dict = r.to_dict()
+                    p_st = r_dict.get("prev_status") or "In Progress"
+                    r_dict["status"] = p_st if p_st != "Done" else "In Progress"
+                    rows_to_update.append(r_dict)
+                upsert_assignments(rows_to_update)
+                safe_rerun()
+
+            st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
+            for _, r_done in df_done_db.iterrows():
+                r_aid = r_done.get("id")
+                c_info_db, c_act_db = st.columns([4, 1.4])
+                with c_info_db:
+                    st.markdown(
+                        f"<div class='recovery-card'>"
+                        f"<div><b style='color:#f8fafc;'>{r_done.get('title')}</b> {get_course_badge_html(r_done.get('course'))}"
+                        f"<div style='font-size:0.76rem; color:#94a3b8; margin-top:2px;'>Type: {r_done.get('atype')} &bull; Due: {r_done.get('due_date')}</div></div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                with c_act_db:
+                    if st.button("Restore Item", key=f"rec_db_{r_aid}", use_container_width=True):
+                        restore_single_assignment(r_done.to_dict())
+        else:
+            st.info("No main database assignments currently marked as 'Done'.")
