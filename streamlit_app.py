@@ -1,11 +1,13 @@
 """
-Assignment Tracker — Per-Day Custom Work Limits Edition
-Fixes:
-- Per-Day Custom Work Limits: Set individual daily study limits for each day of the week 
-  (Mon, Tue, Wed, Thu, Fri, Sat, Sun).
-- Persistent Per-Day Config: Remembers your custom daily limit schedule across sessions in PostgreSQL.
-- Daily Recurring Task Detection: Tasks with '/day', 'per day', 'daily', etc., repeat automatically.
-- Dedicated "Other" Tab & Dual Priority Modes (Low/Med/High, 1-10 Slider, or Both).
+Assignment Tracker — Aesthetic & Mobile-Optimized Edition
+New Features:
+- Daily Hours & Minutes Breakdown: Displays Total Scheduled Work Time vs. Max Work Capacity 
+  formatted cleanly in hours and minutes (e.g., "1 hr 30 mins scheduled / Max: 2 hrs 0 mins").
+- Mobile & Phone Interface Optimization: Fully responsive media query overrides for small 
+  touch screens, mobile tab scrolling, stacked layouts, and expanded touch targets.
+- Premium Modern Aesthetics: Deep dark theme with glassmorphism cards, vibrant priority badges, 
+  glow accents, and polished typography.
+- Per-Day Custom Work Limits: Remembers daily study caps per day of week across sessions.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from sqlalchemy import create_engine, text
 
+
 # Timezone helper for Simsbury/Eastern Time
 def get_local_now() -> datetime:
     try:
@@ -36,7 +39,7 @@ def get_local_now() -> datetime:
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
-    page_icon="📚",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -44,17 +47,20 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
     /* Canvas & Global Typography */
     html, body, .stApp {
         background-color: #070a12 !important;
+        background-image: 
+            radial-gradient(at 15% 15%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+            radial-gradient(at 85% 85%, rgba(14, 165, 233, 0.06) 0px, transparent 50%);
         color: #f1f5f9 !important;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
     }
 
     .main .block-container {
-        padding-top: 1.2rem !important;
+        padding-top: 1rem !important;
         padding-bottom: 3rem !important;
         max-width: 1420px;
     }
@@ -64,52 +70,62 @@ st.markdown(
     div[data-testid="stToolbar"], div[data-testid="stDecoration"], div[data-testid="stStatusWidget"] {display: none !important;}
     section[data-testid="stSidebar"], div[data-testid="collapsedControl"], button[data-testid="stSidebarCollapseButton"] {display: none !important;}
 
-    /* Modern Tabs Styling */
+    /* Modern Responsive Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: transparent;
-        border-bottom: 1px solid #1e293b;
-        margin-bottom: 20px;
+        gap: 6px;
+        background-color: rgba(15, 23, 42, 0.6);
+        border: 1px solid #1e293b;
+        border-radius: 12px;
+        padding: 4px;
+        margin-bottom: 22px;
+        backdrop-filter: blur(8px);
+        overflow-x: auto;
+        white-space: nowrap;
     }
 
     .stTabs [data-baseweb="tab"] {
-        height: 38px;
-        border-radius: 6px;
+        height: 40px;
+        border-radius: 8px;
         color: #94a3b8;
-        font-weight: 500;
+        font-weight: 600;
         font-size: 0.85rem;
         padding: 6px 16px;
-        background-color: #0f172a;
-        border: 1px solid #1e293b;
+        background-color: transparent;
+        border: none;
+        transition: all 0.2s ease-in-out;
     }
 
     .stTabs [aria-selected="true"] {
-        background-color: #1e1b4b !important;
-        color: #a5b4fc !important;
-        border-color: #6366f1 !important;
+        background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%) !important;
+        color: #ffffff !important;
+        box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
     }
 
-    /* Card Containers */
+    /* Card Containers & Glassmorphism */
     div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #0f172a !important;
-        border: 1px solid #1e293b !important;
-        border-radius: 10px !important;
-        padding: 16px 18px 22px 18px !important;
+        background: rgba(15, 23, 42, 0.75) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 14px !important;
+        padding: 16px 18px !important;
         margin-bottom: 16px !important;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-        transition: border-color 0.2s ease;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(12px);
+        transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     }
 
     div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-        border-color: #334155 !important;
+        border-color: rgba(99, 102, 241, 0.4) !important;
+        box-shadow: 0 10px 30px rgba(99, 102, 241, 0.15);
     }
 
-    /* Header & Banner Elements */
+    /* App Header Banner */
     .app-title {
-        font-size: 1.6rem;
+        font-size: 1.7rem;
         font-weight: 800;
-        color: #f8fafc;
-        letter-spacing: -0.02em;
+        background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.03em;
         margin: 0;
     }
 
@@ -121,66 +137,95 @@ st.markdown(
     }
 
     .date-banner {
-        background-color: #0f172a;
-        border: 1px solid #1e293b;
-        border-radius: 8px;
-        padding: 8px 16px;
-        font-size: 0.82rem;
-        font-weight: 600;
+        background: linear-gradient(90deg, rgba(30, 27, 75, 0.5) 0%, rgba(15, 23, 42, 0.7) 100%);
+        border: 1px solid rgba(99, 102, 241, 0.25);
+        border-radius: 10px;
+        padding: 10px 18px;
+        font-size: 0.85rem;
+        font-weight: 700;
         color: #818cf8;
         text-align: center;
-        margin-bottom: 18px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
     }
 
-    /* Priority Pills */
+    /* Badges & Priority Pills */
     .prio-high {
         background: rgba(244, 63, 94, 0.15);
         color: #fb7185;
-        border: 1px solid rgba(244, 63, 94, 0.3);
-        padding: 2px 8px;
-        border-radius: 5px;
+        border: 1px solid rgba(244, 63, 94, 0.35);
+        padding: 3px 10px;
+        border-radius: 6px;
         font-size: 0.75rem;
-        font-weight: 600;
+        font-weight: 700;
     }
 
     .prio-medium {
         background: rgba(245, 158, 11, 0.15);
         color: #fbbf24;
-        border: 1px solid rgba(245, 158, 11, 0.3);
-        padding: 2px 8px;
-        border-radius: 5px;
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        padding: 3px 10px;
+        border-radius: 6px;
         font-size: 0.75rem;
-        font-weight: 600;
+        font-weight: 700;
     }
 
     .prio-low {
         background: rgba(16, 185, 129, 0.15);
         color: #34d399;
-        border: 1px solid rgba(16, 185, 129, 0.3);
-        padding: 2px 8px;
-        border-radius: 5px;
+        border: 1px solid rgba(16, 185, 129, 0.35);
+        padding: 3px 10px;
+        border-radius: 6px;
         font-size: 0.75rem;
-        font-weight: 600;
+        font-weight: 700;
     }
 
-    /* AI Day Card */
+    /* AI Day Card & Time Metrics */
     .ai-day-card {
-        background-color: #0f172a;
+        background: rgba(15, 23, 42, 0.85);
         border: 1px solid #1e293b;
-        border-radius: 10px;
-        padding: 14px;
-        margin-bottom: 12px;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 14px;
+    }
+
+    .ai-day-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 8px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+        gap: 6px;
     }
 
     .ai-day-title {
         color: #38bdf8;
-        font-size: 0.9rem;
-        font-weight: 700;
-        margin-bottom: 8px;
-        border-bottom: 1px solid #1e293b;
-        padding-bottom: 6px;
+        font-size: 0.95rem;
+        font-weight: 800;
         text-transform: uppercase;
         letter-spacing: 0.04em;
+    }
+
+    .day-time-badge {
+        background: rgba(14, 165, 233, 0.12);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-radius: 6px;
+        padding: 3px 10px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: #e0f2fe;
+    }
+
+    .time-max-cap {
+        color: #94a3b8;
+        font-weight: 500;
+    }
+
+    .time-scheduled-over {
+        color: #f43f5e;
+        font-weight: 800;
     }
 
     .slot-badge {
@@ -188,13 +233,13 @@ st.markdown(
         color: #38bdf8;
         border: 1px solid #0284c7;
         padding: 3px 8px;
-        border-radius: 5px;
+        border-radius: 6px;
         font-family: monospace;
         font-size: 0.78rem;
-        font-weight: 600;
+        font-weight: 700;
     }
 
-    /* Undo Toast Container */
+    /* Toast Notification */
     .undo-toast-box {
         position: relative;
         background-color: #0f172a;
@@ -221,6 +266,40 @@ st.markdown(
     @keyframes countdown-anim {
         from { width: 100%; }
         to { width: 0%; }
+    }
+
+    /* Mobile & Phone Responsive Overrides */
+    @media (max-width: 768px) {
+        .main .block-container {
+            padding-top: 0.6rem !important;
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+        }
+
+        .app-title {
+            font-size: 1.35rem !important;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            height: 36px;
+            font-size: 0.78rem;
+            padding: 4px 10px;
+        }
+
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            padding: 12px 14px !important;
+            margin-bottom: 12px !important;
+        }
+
+        .ai-day-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .day-time-badge {
+            font-size: 0.72rem;
+            padding: 2px 8px;
+        }
     }
     </style>
     """,
@@ -324,6 +403,18 @@ except Exception as e:
 # -----------------------
 # Helper Utilities
 # -----------------------
+def format_mins_to_hrs_mins(mins: int) -> str:
+    if mins <= 0:
+        return "0 mins"
+    h = mins // 60
+    m = mins % 60
+    if h == 0:
+        return f"{m} mins"
+    if m == 0:
+        return f"{h} hr" if h == 1 else f"{h} hrs"
+    return f"{h} hr {m} mins" if h == 1 else f"{h} hrs {m} mins"
+
+
 def get_course_badge_html(course_name: str) -> str:
     c = str(course_name or "GENERAL").strip().upper()
     if any(k in c for k in ["MATH", "CALC", "STAT", "ALG", "GEO"]):
@@ -341,7 +432,7 @@ def get_course_badge_html(course_name: str) -> str:
     else:
         bg, fg, border = "#0c4a6e", "#7dd3fc", "#0284c7"
 
-    return f"<span style='background-color:{bg}; color:{fg}; border:1px solid {border}; padding:3px 10px; border-radius:5px; font-weight:700; font-size:0.75rem; letter-spacing:0.03em; display:inline-block;'>{c}</span>"
+    return f"<span style='background-color:{bg}; color:{fg}; border:1px solid {border}; padding:3px 10px; border-radius:6px; font-weight:700; font-size:0.75rem; letter-spacing:0.03em; display:inline-block;'>{c}</span>"
 
 
 def priority_to_label(val: Any) -> str:
@@ -846,7 +937,7 @@ def days_left(d: Optional[date]) -> Tuple[str, int]:
 
 
 # -----------------------
-# AI Time-Slot Scheduler Engine (Per-Day Custom Limit Support)
+# AI Time-Slot Scheduler Engine
 # -----------------------
 def generate_ai_study_plan(
     df_tasks: pd.DataFrame, 
@@ -1010,14 +1101,14 @@ def render_terminal_auth_page():
 
     with c_center:
         st.markdown(
-            "<div style='background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 32px 28px; text-align: center; margin-bottom: 20px;'>"
-            "<div style='font-size: 1.8rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;'>Assignment Tracker</div>"
+            "<div style='background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px 28px; text-align: center; margin-bottom: 20px; backdrop-filter: blur(12px); shadow: 0 10px 30px rgba(0,0,0,0.5);'>"
+            "<div style='font-size: 1.9rem; font-weight: 800; color: #ffffff; letter-spacing: -0.03em;'>Assignment Tracker</div>"
             "<div style='font-size: 0.85rem; color: #64748b; margin-top: 4px;'>Simsbury High School Portal</div>"
             "</div>",
             unsafe_allow_html=True,
         )
 
-        st.markdown('<div style="background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 24px 28px;">', unsafe_allow_html=True)
+        st.markdown('<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid #1e293b; border-radius: 14px; padding: 24px 28px;">', unsafe_allow_html=True)
 
         mode = st.radio("Action Mode", ["Sign In", "Sign Up"], horizontal=True, label_visibility="collapsed", key="terminal_mode")
 
@@ -1101,7 +1192,7 @@ def render_assignment_grid(df_grid: pd.DataFrame, user_prio_mode: str, key_prefi
                     prio_display_str = format_priority_display(prio_num, user_prio_mode)
                     row_dict = row.to_dict()
 
-                    # Top Row: Checkbox, Course Badge, Edit Button, Status Selector
+                    # Top Row Header Controls
                     c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.8, 1.1, 2.3])
 
                     with c_top1:
@@ -1140,10 +1231,10 @@ def render_assignment_grid(df_grid: pd.DataFrame, user_prio_mode: str, key_prefi
                     eta = str(row.get("eta") or "").strip()
                     notes = str(row.get("notes") or "").strip()
 
-                    # Bottom Metadata Row: Due Date + Est on left, Dynamic Priority Display on right
+                    # Bottom Metadata Row
                     eta_snippet = f" &bull; Est: {eta}" if eta else ""
                     bot_html = (
-                        f"<div style='display:flex; align-items:center; justify-content:space-between; margin-top:10px; margin-bottom:12px; padding-top:10px; border-top:1px solid #1e293b;'>"
+                        f"<div style='display:flex; align-items:center; justify-content:space-between; margin-top:10px; margin-bottom:12px; padding-top:10px; border-top:1px solid rgba(255, 255, 255, 0.08);'>"
                         f"<div style='font-size:0.78rem; color:#94a3b8;'>Due {due_text} <span style='color:#64748b;'>({days_text})</span>{eta_snippet}</div>"
                         f"<div class='{prio_cls}'>Priority: {prio_display_str}</div>"
                         f"</div>"
@@ -1433,14 +1524,14 @@ col_header_left, col_header_right = st.columns([2, 3])
 
 with col_header_left:
     st.markdown(
-        f"<div style='margin-bottom:4px;'><div class='app-title'>Assignment Tracker</div><div class='app-subtitle'>{email} &bull; <span style='color:#818cf8;'>System: {user_prio_mode}</span></div></div>",
+        f"<div style='margin-bottom:6px;'><div class='app-title'>Assignment Tracker</div><div class='app-subtitle'>{email} &bull; <span style='color:#818cf8;'>System: {user_prio_mode}</span></div></div>",
         unsafe_allow_html=True,
     )
 
 with col_header_right:
     btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.2, 1.1, 1.1, 1.1, 0.9])
     with btn_col1:
-        if st.button("Clear Completed", key="toolbar_clear"):
+        if st.button("Clear Completed", key="toolbar_clear", use_container_width=True):
             df_active = fetch_assignments(user_id)
             if not df_active.empty:
                 done_ids = df_active[df_active["status"] == "Done"]["id"].tolist()
@@ -1448,19 +1539,19 @@ with col_header_right:
                     delete_assignment(aid)
             safe_rerun()
     with btn_col2:
-        if st.button("New Task", key="toolbar_add"):
+        if st.button("New Task", key="toolbar_add", use_container_width=True):
             st.session_state["_open_add_modal"] = True
             safe_rerun()
     with btn_col3:
-        if st.button("Courses", key="toolbar_courses"):
+        if st.button("Courses", key="toolbar_courses", use_container_width=True):
             st.session_state["_open_manage_courses"] = True
             safe_rerun()
     with btn_col4:
-        if st.button("Priority View", key="toolbar_prio_sys"):
+        if st.button("Priority View", key="toolbar_prio_sys", use_container_width=True):
             st.session_state["_show_prio_config_modal"] = True
             safe_rerun()
     with btn_col5:
-        if st.button("Sign Out", key="toolbar_signout"):
+        if st.button("Sign Out", key="toolbar_signout", use_container_width=True):
             sign_out_user()
 
 today_str = get_local_now().strftime("%A, %B %d, %Y")
@@ -1525,7 +1616,7 @@ with tab_schedule:
             with c_time2:
                 s_end_raw = st.text_input("End Time", value="5:00 PM", key="sched_end_input")
 
-            if st.form_submit_button("Add Block"):
+            if st.form_submit_button("Add Block", use_container_width=True):
                 st_time = parse_time_str(s_start_raw)
                 end_time = parse_time_str(s_end_raw)
                 if s_title.strip() and st_time and end_time:
@@ -1574,7 +1665,7 @@ with tab_schedule:
                         unsafe_allow_html=True,
                     )
                 with u_col2:
-                    if st.button("Undo", key="btn_undo_slot", on_click=on_undo_daily_slot):
+                    if st.button("Undo", key="btn_undo_slot", on_click=on_undo_daily_slot, use_container_width=True):
                         safe_rerun()
 
                 components.html(
@@ -1593,7 +1684,7 @@ with tab_schedule:
         ctrl_col1, ctrl_col2 = st.columns([1.5, 1.2])
 
         with ctrl_col1:
-            gen_plan_click = st.button("Re-Calculate Plan", key="btn_gen_ai_plan")
+            gen_plan_click = st.button("Re-Calculate Plan", key="btn_gen_ai_plan", use_container_width=True)
 
         with ctrl_col2:
             show_time_slots = st.toggle("Show Time Slots", value=True, key="toggle_show_time_slots")
@@ -1601,7 +1692,7 @@ with tab_schedule:
         # Per-Day Max Work Limit Expander Controller
         with st.expander("⏱️ Customize Daily Work Limits (Per Day)", expanded=False):
             st.caption("Set maximum allowed study/work time independently for each day of the week:")
-            opts = [0, 15, 30, 45, 60, 90, 120, 150, 180, 240]
+            opts = [0, 15, 30, 45, 60, 90, 120, 150, 180, 210, 240, 300]
             
             day_cols = st.columns(7)
             new_limits_dict = {}
@@ -1654,9 +1745,22 @@ with tab_schedule:
                     safe_rerun()
                     break
 
+                raw_slots = day_data.get("slots", [])
+                visible_slots = [s for s in raw_slots if s.get("slot_key") not in completed_set]
+
+                # Calculate scheduled time vs max allowed time in hours and minutes
                 day_cap_mins = stored_max_daily_work_dict.get(day_name, 60)
+                scheduled_mins = sum(s.get("eta_mins", 0) for s in visible_slots)
+                
+                sched_formatted = format_mins_to_hrs_mins(scheduled_mins)
+                max_formatted = format_mins_to_hrs_mins(day_cap_mins)
+
                 st.markdown(
-                    f'<div class="ai-day-card"><div class="ai-day-title">{day_name} <span style="font-size:0.75rem; color:#64748b; font-weight:500; text-transform:none;">(Max {day_cap_mins}m)</span></div>',
+                    f'<div class="ai-day-card">'
+                    f'<div class="ai-day-header">'
+                    f'<span class="ai-day-title">{day_name}</span>'
+                    f'<div class="day-time-badge">{sched_formatted} scheduled <span class="time-max-cap">/ Max {max_formatted}</span></div>'
+                    f'</div>',
                     unsafe_allow_html=True
                 )
 
@@ -1664,13 +1768,11 @@ with tab_schedule:
                 if busy_list:
                     st.caption("Busy: " + ", ".join(busy_list))
 
-                raw_slots = day_data.get("slots", [])
-                visible_slots = [s for s in raw_slots if s.get("slot_key") not in completed_set]
-
                 if visible_slots:
                     for idx_slot, s in enumerate(visible_slots):
                         s_key = s.get("slot_key")
                         slot_prio_str = format_priority_display(s.get("priority"), user_prio_mode)
+                        slot_duration_str = format_mins_to_hrs_mins(s.get("eta_mins", 0))
 
                         c_chk, c_text = st.columns([0.35, 7.65])
                         with c_chk:
@@ -1687,12 +1789,12 @@ with tab_schedule:
                         with c_text:
                             if show_time_slots:
                                 st.markdown(
-                                    f"<span class='slot-badge'>{s['time']}</span> — <b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio_str} ({s['eta_mins']} mins)</span>",
+                                    f"<span class='slot-badge'>{s['time']}</span> — <b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio_str} ({slot_duration_str})</span>",
                                     unsafe_allow_html=True
                                 )
                             else:
                                 st.markdown(
-                                    f"<b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio_str} ({s['eta_mins']} mins)</span>",
+                                    f"<b style='color:#f8fafc;'>{s['title']}</b> {get_course_badge_html(s['course'])} <span style='color:#94a3b8; font-size:0.78rem;'>| Priority: {slot_prio_str} ({slot_duration_str})</span>",
                                     unsafe_allow_html=True
                                 )
                 else:
