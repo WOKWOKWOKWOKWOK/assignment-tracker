@@ -1265,7 +1265,7 @@ def render_terminal_auth_page():
                             st.session_state["_show_prio_config_modal"] = True
                         safe_rerun()
 
-        st.markdown('</div>', unsafe_allow_html=True)"""
+        st.markdown('</div>', unsafe_allow_html=True)
 # -----------------------
 # Modal Dialogs
 # -----------------------
