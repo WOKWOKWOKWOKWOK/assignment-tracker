@@ -1,13 +1,12 @@
 """
-Assignment Tracker — Aesthetic & Mobile-Optimized Edition
-New Features:
+Assignment Tracker — Auto-Fill & Seamless Auth Edition
+Fixes:
+- Instant Login / Auto-Fill: Wrapped authentication fields in an `st.form` container so browser-saved 
+  credentials submit instantly on click or Enter without needing double-keypresses.
 - Daily Hours & Minutes Breakdown: Displays Total Scheduled Work Time vs. Max Work Capacity 
-  formatted cleanly in hours and minutes (e.g., "1 hr 30 mins scheduled / Max: 2 hrs 0 mins").
-- Mobile & Phone Interface Optimization: Fully responsive media query overrides for small 
-  touch screens, mobile tab scrolling, stacked layouts, and expanded touch targets.
-- Premium Modern Aesthetics: Deep dark theme with glassmorphism cards, vibrant priority badges, 
-  glow accents, and polished typography.
-- Per-Day Custom Work Limits: Remembers daily study caps per day of week across sessions.
+  formatted cleanly in hours and minutes.
+- Mobile & Phone Interface Optimization: Responsive media query overrides for small touch screens.
+- Per-Day Custom Work Limits & Dedicated "Other" Tab.
 """
 
 from __future__ import annotations
@@ -39,7 +38,7 @@ def get_local_now() -> datetime:
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
-    page_icon="📚",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -223,11 +222,6 @@ st.markdown(
         font-weight: 500;
     }
 
-    .time-scheduled-over {
-        color: #f43f5e;
-        font-weight: 800;
-    }
-
     .slot-badge {
         background: #1e1b4b;
         color: #38bdf8;
@@ -268,7 +262,7 @@ st.markdown(
         to { width: 0%; }
     }
 
-    /* Mobile & Phone Responsive Overrides */
+    /* Mobile Responsive Overrides */
     @media (max-width: 768px) {
         .main .block-container {
             padding-top: 0.6rem !important;
@@ -1094,7 +1088,7 @@ def generate_ai_study_plan(
 
 
 # -----------------------
-# Terminal Auth Interface
+# Terminal Auth Interface (st.form Wrapped for Instant Saved Password Autofill)
 # -----------------------
 def render_terminal_auth_page():
     c_left, c_center, c_right = st.columns([1, 1.6, 1])
@@ -1112,44 +1106,47 @@ def render_terminal_auth_page():
 
         mode = st.radio("Action Mode", ["Sign In", "Sign Up"], horizontal=True, label_visibility="collapsed", key="terminal_mode")
 
-        raw_user_input = st.text_input(
-            "Username or Email",
-            placeholder="e.g. 30guptaa or username@simsburyschools.net",
-            key="terminal_user"
-        )
+        with st.form("auth_credentials_form", clear_on_submit=False):
+            raw_user_input = st.text_input(
+                "Username or Email",
+                placeholder="e.g. 30guptaa or username@simsburyschools.net",
+                key="terminal_user"
+            )
 
-        password = st.text_input("Password", type="password", key="terminal_pw")
-        typed_user = raw_user_input.strip()
-        btn_label = "Sign In" if mode == "Sign In" else "Register Account"
+            password = st.text_input("Password", type="password", key="terminal_pw")
+            typed_user = raw_user_input.strip()
+            btn_label = "Sign In" if mode == "Sign In" else "Register Account"
 
-        if st.button(btn_label, key="auth_submit_btn", use_container_width=True):
-            email_val = typed_user
-            if email_val and "@" not in email_val:
-                email_val = f"{email_val}{DEFAULT_DOMAIN}"
+            submitted = st.form_submit_button(btn_label, use_container_width=True)
 
-            password_val = password.strip()
+            if submitted:
+                email_val = typed_user
+                if email_val and "@" not in email_val:
+                    email_val = f"{email_val}{DEFAULT_DOMAIN}"
 
-            if not email_val or not password_val:
-                st.error("Please enter both credentials.")
-            elif mode == "Sign Up":
-                res = sign_up_user(email_val, password_val)
-                if "error" in res:
-                    st.error(f"Sign up failed: {res['error']}")
+                password_val = password.strip()
+
+                if not email_val or not password_val:
+                    st.error("Please enter both credentials.")
+                elif mode == "Sign Up":
+                    res = sign_up_user(email_val, password_val)
+                    if "error" in res:
+                        st.error(f"Sign up failed: {res['error']}")
+                    else:
+                        st.success(f"Registered {email_val}. You can now sign in.")
                 else:
-                    st.success(f"Registered {email_val}. You can now sign in.")
-            else:
-                res = sign_in_user(email_val, password_val)
-                if "error" in res:
-                    st.error(f"Sign in failed: {res['error']}")
-                else:
-                    st.session_state.user = res["data"]
-                    u_id = res["data"]["id"]
-                    invalidate_cache()
-                    if not _read_courses_file(u_id):
-                        st.session_state["_show_welcome_courses_modal"] = True
-                    if not _read_prio_config(u_id):
-                        st.session_state["_show_prio_config_modal"] = True
-                    safe_rerun()
+                    res = sign_in_user(email_val, password_val)
+                    if "error" in res:
+                        st.error(f"Sign in failed: {res['error']}")
+                    else:
+                        st.session_state.user = res["data"]
+                        u_id = res["data"]["id"]
+                        invalidate_cache()
+                        if not _read_courses_file(u_id):
+                            st.session_state["_show_welcome_courses_modal"] = True
+                        if not _read_prio_config(u_id):
+                            st.session_state["_show_prio_config_modal"] = True
+                        safe_rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1301,7 +1298,6 @@ def show_add_assignment_dialog(user_id: str, prio_mode: str):
         status = st.selectbox("Status", STATUS_OPTIONS, index=0, key="add_status")
         due = st.date_input("Due Date", value=get_local_now().date(), key="add_due")
 
-        # Priority Input based on user mode preference
         prio_val_to_save = 5
         if prio_mode == "1 to 10 Scale (Slider)":
             prio_val_to_save = st.slider("Priority Rating (1 - 10)", min_value=1, max_value=10, value=5, key="add_prio_slider")
@@ -1380,7 +1376,6 @@ def show_edit_assignment_dialog(user_id: str, aid: str, prio_mode: str):
         due_parsed = parse_date_iso_or_empty(assignment_record.get("due_date")) or get_local_now().date()
         due = st.date_input("Due Date", value=due_parsed, key=f"edit_due_{aid}")
 
-        # Priority Input based on active mode
         curr_prio_num = priority_to_int(assignment_record.get("priority"))
         curr_prio_lbl = priority_to_label(curr_prio_num)
 
@@ -1748,7 +1743,6 @@ with tab_schedule:
                 raw_slots = day_data.get("slots", [])
                 visible_slots = [s for s in raw_slots if s.get("slot_key") not in completed_set]
 
-                # Calculate scheduled time vs max allowed time in hours and minutes
                 day_cap_mins = stored_max_daily_work_dict.get(day_name, 60)
                 scheduled_mins = sum(s.get("eta_mins", 0) for s in visible_slots)
                 
