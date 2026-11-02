@@ -1,5 +1,10 @@
 """
-📚 Assignment Tracker — Complete & Fixed Edition with Custom Logo
+📚 Assignment Tracker — Complete & Fixed Edition with Mobile Portrait Optimization
+Features:
+- Instant Auth Transition (No lingering login screen)
+- Optimized Mobile / Vertical Screen Responsive Layout
+- SVG Stacked-Card Logo
+- Done Task Auto-Purging & Completed Recovery Center
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ def get_local_now() -> datetime:
 
 
 # -----------------------
-# Streamlit Page Config & Custom Styling
+# Streamlit Page Config & Custom Mobile-Optimized Styling
 # -----------------------
 st.set_page_config(
     page_title="Assignment Tracker",
@@ -256,36 +261,57 @@ st.markdown(
         justify-content: space-between;
     }
 
+    /* -------------------------------------------
+       MOBILE & PORTRAIT DISPLAY OPTIMIZATIONS
+    ------------------------------------------- */
     @media (max-width: 768px) {
         .main .block-container {
-            padding-top: 0.6rem !important;
-            padding-left: 0.5rem !important;
-            padding-right: 0.5rem !important;
+            padding-top: 0.5rem !important;
+            padding-left: 0.4rem !important;
+            padding-right: 0.4rem !important;
         }
 
         .app-title {
-            font-size: 1.35rem !important;
+            font-size: 1.3rem !important;
+        }
+
+        .stTabs [data-baseweb="tab-list"] {
+            padding: 3px !important;
+            gap: 4px !important;
         }
 
         .stTabs [data-baseweb="tab"] {
-            height: 36px;
-            font-size: 0.78rem;
-            padding: 4px 10px;
+            height: 34px !important;
+            font-size: 0.76rem !important;
+            padding: 4px 10px !important;
         }
 
         div[data-testid="stVerticalBlockBorderWrapper"] {
             padding: 12px 14px !important;
             margin-bottom: 12px !important;
+            border-radius: 12px !important;
+        }
+
+        .stButton button {
+            padding: 4px 8px !important;
+            font-size: 0.78rem !important;
         }
 
         .ai-day-header {
             flex-direction: column;
             align-items: flex-start;
+            gap: 4px;
         }
 
         .day-time-badge {
             font-size: 0.72rem;
             padding: 2px 8px;
+        }
+
+        .date-banner {
+            padding: 8px 12px !important;
+            font-size: 0.78rem !important;
+            margin-bottom: 14px !important;
         }
     }
     </style>
@@ -679,7 +705,6 @@ def _write_max_work_config(user_id: str, max_mins_dict: Dict[str, int]) -> None:
 
 
 def _read_completed_slots(user_id: str) -> Dict[str, Dict[str, Any]]:
-    """Reads today's completed daily slots from database, auto-clearing old days at midnight."""
     cfg_id = get_completed_slots_config_id(user_id)
     sql = text("SELECT notes FROM assignments WHERE id = :id AND user_id = :uid")
     today_str = get_local_now().date().isoformat()
@@ -699,7 +724,6 @@ def _read_completed_slots(user_id: str) -> Dict[str, Dict[str, Any]]:
 
 
 def _write_completed_slots(user_id: str, today_slots: Dict[str, Dict[str, Any]]) -> None:
-    """Saves today's completed daily slots to PostgreSQL."""
     if not user_id:
         return
     cfg_id = get_completed_slots_config_id(user_id)
@@ -729,10 +753,6 @@ def invalidate_cache():
 
 
 def fetch_assignments(user_id: str) -> pd.DataFrame:
-    """
-    Fetches assignments from the database.
-    Automatically purges completed ('Done') assignments whose due date has passed.
-    """
     today_iso = get_local_now().date().isoformat()
 
     sql_purge_expired = text("""
@@ -838,7 +858,6 @@ def delete_assignment(assignment_id: str) -> None:
 
 
 def restore_single_assignment(row_dict: Dict[str, Any]):
-    """Restores assignment, unchecks checkbox, and reverts to previous status."""
     aid = str(row_dict.get("id"))
     prev_st = row_dict.get("prev_status") or "In Progress"
     if prev_st == "Done":
@@ -847,7 +866,6 @@ def restore_single_assignment(row_dict: Dict[str, Any]):
     row_dict["status"] = prev_st
     upsert_assignments([row_dict])
 
-    # Uncheck checkboxes and reset dropdowns across all tab views in session state
     for key in list(st.session_state.keys()):
         if aid in key:
             if "chk_done" in key:
@@ -1190,80 +1208,83 @@ def generate_ai_study_plan(
 
 
 # -----------------------
-# Terminal Auth Interface
+# Instant-Rerun Terminal Auth Interface
 # -----------------------
 def render_terminal_auth_page():
-    c_left, c_center, c_right = st.columns([1, 1.6, 1])
+    auth_container = st.empty()
+    with auth_container.container():
+        c_left, c_center, c_right = st.columns([1, 1.6, 1])
 
-    with c_center:
-        st.markdown(
-            """
-            <div style='background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px 28px; text-align: center; margin-bottom: 20px; backdrop-filter: blur(12px); box-shadow: 0 10px 30px rgba(0,0,0,0.5);'>
-                <div style='display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom: 4px;'>
-                    <svg width='34' height='34' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
-                        <rect x='2' y='3' width='12' height='12' rx='2' fill='white' opacity='0.5'/>
-                        <rect x='6' y='7' width='12' height='12' rx='2' fill='white' opacity='0.8'/>
-                        <rect x='10' y='11' width='12' height='12' rx='2' fill='white'/>
-                    </svg>
-                    <span style='font-size: 1.9rem; font-weight: 800; color: #ffffff; letter-spacing: -0.03em;'>Assignment Tracker</span>
+        with c_center:
+            st.markdown(
+                """
+                <div style='background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px 28px; text-align: center; margin-bottom: 20px; backdrop-filter: blur(12px); box-shadow: 0 10px 30px rgba(0,0,0,0.5);'>
+                    <div style='display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom: 4px;'>
+                        <svg width='34' height='34' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
+                            <rect x='2' y='3' width='12' height='12' rx='2' fill='white' opacity='0.5'/>
+                            <rect x='6' y='7' width='12' height='12' rx='2' fill='white' opacity='0.8'/>
+                            <rect x='10' y='11' width='12' height='12' rx='2' fill='white'/>
+                        </svg>
+                        <span style='font-size: 1.9rem; font-weight: 800; color: #ffffff; letter-spacing: -0.03em;'>Assignment Tracker</span>
+                    </div>
+                    <div style='font-size: 0.85rem; color: #64748b;'>Simsbury High School Portal</div>
                 </div>
-                <div style='font-size: 0.85rem; color: #64748b;'>Simsbury High School Portal</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown('<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid #1e293b; border-radius: 14px; padding: 24px 28px;">', unsafe_allow_html=True)
-
-        mode = st.radio("Action Mode", ["Sign In", "Sign Up"], horizontal=True, label_visibility="collapsed", key="terminal_mode")
-
-        with st.form("auth_credentials_form", clear_on_submit=False):
-            raw_user_input = st.text_input(
-                "Username or Email",
-                placeholder="e.g. 30guptaa or username@simsburyschools.net",
-                key="terminal_user"
+                """,
+                unsafe_allow_html=True,
             )
 
-            password = st.text_input("Password", type="password", key="terminal_pw")
-            typed_user = raw_user_input.strip()
-            btn_label = "Sign In" if mode == "Sign In" else "Register Account"
+            st.markdown('<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid #1e293b; border-radius: 14px; padding: 24px 28px;">', unsafe_allow_html=True)
 
-            submitted = st.form_submit_button(btn_label, use_container_width=True)
+            mode = st.radio("Action Mode", ["Sign In", "Sign Up"], horizontal=True, label_visibility="collapsed", key="terminal_mode")
 
-            if submitted:
-                email_val = typed_user
-                if email_val and "@" not in email_val:
-                    email_val = f"{email_val}{DEFAULT_DOMAIN}"
+            with st.form("auth_credentials_form", clear_on_submit=False):
+                raw_user_input = st.text_input(
+                    "Username or Email",
+                    placeholder="e.g. 30guptaa or username@simsburyschools.net",
+                    key="terminal_user"
+                )
 
-                password_val = password.strip()
+                password = st.text_input("Password", type="password", key="terminal_pw")
+                typed_user = raw_user_input.strip()
+                btn_label = "Sign In" if mode == "Sign In" else "Register Account"
 
-                if not email_val or not password_val:
-                    st.error("Please enter both credentials.")
-                elif mode == "Sign Up":
-                    res = sign_up_user(email_val, password_val)
-                    if "error" in res:
-                        st.error(f"Sign up failed: {res['error']}")
+                submitted = st.form_submit_button(btn_label, use_container_width=True)
+
+                if submitted:
+                    email_val = typed_user
+                    if email_val and "@" not in email_val:
+                        email_val = f"{email_val}{DEFAULT_DOMAIN}"
+
+                    password_val = password.strip()
+
+                    if not email_val or not password_val:
+                        st.error("Please enter both credentials.")
+                    elif mode == "Sign Up":
+                        res = sign_up_user(email_val, password_val)
+                        if "error" in res:
+                            st.error(f"Sign up failed: {res['error']}")
+                        else:
+                            st.success(f"Registered {email_val}. You can now sign in.")
                     else:
-                        st.success(f"Registered {email_val}. You can now sign in.")
-                else:
-                    res = sign_in_user(email_val, password_val)
-                    if "error" in res:
-                        st.error(f"Sign in failed: {res['error']}")
-                    else:
-                        st.session_state.user = res["data"]
-                        u_id = res["data"]["id"]
-                        invalidate_cache()
-                        if not _read_courses_file(u_id):
-                            st.session_state["_show_welcome_courses_modal"] = True
-                        if not _read_prio_config(u_id):
-                            st.session_state["_show_prio_config_modal"] = True
-                        safe_rerun()
+                        res = sign_in_user(email_val, password_val)
+                        if "error" in res:
+                            st.error(f"Sign in failed: {res['error']}")
+                        else:
+                            st.session_state.user = res["data"]
+                            u_id = res["data"]["id"]
+                            invalidate_cache()
+                            if not _read_courses_file(u_id):
+                                st.session_state["_show_welcome_courses_modal"] = True
+                            if not _read_prio_config(u_id):
+                                st.session_state["_show_prio_config_modal"] = True
+                            auth_container.empty()
+                            safe_rerun()
 
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
 
 # -----------------------
-# Grid Renderer Component
+# Responsive Mobile-Friendly Grid Renderer
 # -----------------------
 def render_assignment_grid(df_grid: pd.DataFrame, user_prio_mode: str, key_prefix: str = "reg_"):
     if df_grid.empty:
@@ -1300,10 +1321,10 @@ def render_assignment_grid(df_grid: pd.DataFrame, user_prio_mode: str, key_prefi
                     prio_display_str = format_priority_display(prio_num, user_prio_mode)
                     row_dict = row.to_dict()
 
-                    # Top Header Controls
-                    c_top1, c_top2, c_top3, c_top4 = st.columns([0.4, 1.8, 1.1, 2.3])
+                    # Row 1: Checkbox, Course Badge & Edit Action (Clean wrap for phone portrait)
+                    c_top_a, c_top_b, c_top_c = st.columns([0.6, 3.4, 1.2])
 
-                    with c_top1:
+                    with c_top_a:
                         st.checkbox(
                             "Done",
                             value=(status == "Done"),
@@ -1313,26 +1334,26 @@ def render_assignment_grid(df_grid: pd.DataFrame, user_prio_mode: str, key_prefi
                             args=(aid, row_dict, chk_key, sel_key)
                         )
 
-                    with c_top2:
+                    with c_top_b:
                         st.markdown(get_course_badge_html(course), unsafe_allow_html=True)
 
-                    with c_top3:
+                    with c_top_c:
                         if st.button("Edit", key=f"{key_prefix}edit_btn_{aid}"):
                             st.session_state["_edit_assignment_id"] = aid
                             safe_rerun()
 
-                    with c_top4:
-                        st.selectbox(
-                            "Status",
-                            STATUS_OPTIONS,
-                            index=STATUS_OPTIONS.index(status) if status in STATUS_OPTIONS else 0,
-                            key=sel_key,
-                            label_visibility="collapsed",
-                            on_change=on_status_change,
-                            args=(aid, row_dict, sel_key, chk_key)
-                        )
+                    # Row 2: Dedicated Status Selector (Legible on mobile screens)
+                    st.selectbox(
+                        "Status",
+                        STATUS_OPTIONS,
+                        index=STATUS_OPTIONS.index(status) if status in STATUS_OPTIONS else 0,
+                        key=sel_key,
+                        label_visibility="collapsed",
+                        on_change=on_status_change,
+                        args=(aid, row_dict, sel_key, chk_key)
+                    )
 
-                    st.markdown(f"<div style='font-size:1.15rem; font-weight:700; color:#f8fafc; margin-top:10px;'>{title}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:1.15rem; font-weight:700; color:#f8fafc; margin-top:8px;'>{title}</div>", unsafe_allow_html=True)
                     st.markdown(f"<div style='color:#64748b; font-size:0.8rem; margin-top:2px; margin-bottom:12px;'>{atype}</div>", unsafe_allow_html=True)
 
                     eta = str(row.get("eta") or "").strip()
@@ -1682,7 +1703,7 @@ tab_assignments, tab_tests, tab_other, tab_schedule, tab_completed = st.tabs([
     "Completed & Recovery"
 ])
 
-# TAB 1: Regular Assignments (Filters out 'Done' tasks so completed items disappear)
+# TAB 1: Regular Assignments
 with tab_assignments:
     df_regular = df_all[
         (df_all["status"] != "Done") & 
@@ -1692,7 +1713,7 @@ with tab_assignments:
     ]
     render_assignment_grid(df_regular, user_prio_mode, key_prefix="reg_")
 
-# TAB 2: Tests & Quizzes Only (Filters out 'Done' tasks)
+# TAB 2: Tests & Quizzes Only
 with tab_tests:
     df_tests = df_all[
         (df_all["status"] != "Done") & 
@@ -1700,7 +1721,7 @@ with tab_tests:
     ]
     render_assignment_grid(df_tests, user_prio_mode, key_prefix="tests_")
 
-# TAB 3: Dedicated "Other" Tasks Section (Filters out 'Done' tasks)
+# TAB 3: Dedicated "Other" Tasks Section
 with tab_other:
     df_other = df_all[
         (df_all["status"] != "Done") & 
